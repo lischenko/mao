@@ -6,6 +6,7 @@ import { rmSync, existsSync, mkdirSync } from "node:fs";
 import { openDb } from "./db.js";
 import { loadWorkflow, resolveWorkflowPath } from "./workflow.js";
 import { runScheduler } from "./scheduler.js";
+import { validateWorkflowModels } from "./runner.js";
 import { HUMAN_AGENT_ID } from "./human.js";
 import {
   inferProjectFromCwd,
@@ -97,7 +98,14 @@ Examples:
       }
     }
 
-    // 4. Run
+    // 4. Validate models before starting the scheduler
+    const modelError = await validateWorkflowModels(workflow, opts.model);
+    if (modelError) {
+      console.error(`\n[mao] ${modelError}`);
+      process.exit(1);
+    }
+
+    // 5. Run
     console.log(`\n[mao] ${name}  workflow: ${workflow.name}  repo: ${cfg.repo}`);
     await runScheduler({
       projectDir: dir,

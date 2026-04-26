@@ -9,13 +9,22 @@ The project is experimental, unstable, and mostly built for my own education. It
 ## Quick Start
 
 ```sh
+# Install pi if you don't already have it
+npm install -g @mariozechner/pi-coding-agent
+
+# Run pi once and use /login to connect a model (OAuth or API key)
+pi
+
+# Clone mao, build it, and link it globally
 npm install
 npm run build
 npm link
 
 cd /path/to/a/repo
-mao run --project demo --repo . --workflow stavros --prompt "create a hello world CLI"
+mao run --project demo --repo . --workflow star-team --prompt "create a hello world CLI"
 ```
+
+Mao uses pi's default model unless a workflow overrides it per-agent (e.g., [stavros](workflows/stavros/config.json) assigns specific models to each role).
 
 Resume later from the repo directory:
 

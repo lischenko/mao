@@ -145,6 +145,14 @@ function formatMissingReplyProd(mailId: MailId, senderId: AgentId): string {
   );
 }
 
+/** Non-throwing variant used by validateWorkflowModels. */
+function resolveModelSpec(spec: string, modelRegistry: ModelRegistry): any | undefined {
+  const explicit = parseModelSpec(spec);
+  return explicit
+    ? modelRegistry.find(explicit.provider, explicit.modelId)
+    : modelRegistry.getAll().find((candidate) => candidate.id === spec);
+}
+
 function resolvePersonaModel(modelSpec: string | undefined, personaId: string, modelRegistry: ModelRegistry): any | undefined {
   if (!modelSpec) return undefined;
 
@@ -157,6 +165,71 @@ function resolvePersonaModel(modelSpec: string | undefined, personaId: string, m
     throw new Error(`Unknown model for persona ${personaId}: ${modelSpec}`);
   }
   return model;
+}
+
+/**
+ * Validate that every persona in the workflow has: a resolvable model, and auth
+ * credentials for the model's provider. Returns null if all are fine, otherwise
+ * a user-facing error message.
+ */
+export async function validateWorkflowModels(
+  workflow: WorkflowConfig,
+  modelOverride?: string
+): Promise<string | null> {
+  const authStorage = AuthStorage.create();
+  const modelRegistry = ModelRegistry.create(authStorage);
+  const allModels = modelRegistry.getAll();
+
+  if (allModels.length === 0) {
+    return (
+      "No models are configured in pi.\n" +
+      'Run `pi` and use /login to connect a provider (OpenAI, Anthropic, etc.) or set an API key.\n' +
+      "See: https://github.com/badlogic/pi-mono/blob/main/packages/ai/README.md"
+    );
+  }
+
+  const missingAuth: Set<string> = new Set();
+
+  for (const persona of workflow.personas) {
+    // Mirror the resolution logic in runAgentTurn
+    const modelSpec = modelOverride
+      ? parseModelFromOverride(modelOverride)
+      : persona.model;
+
+    if (!modelSpec) {
+      // Persona has no model — pi picks its default. Check if *any* model has auth.
+      const anyAuth = allModels.some((m) => authStorage.hasAuth(m.provider));
+      if (!anyAuth) {
+        return (
+          "No API key or OAuth token configured for any provider in pi.\n" +
+          'Run `pi` and use /login to connect a provider, or set an API key.\n' +
+          "See: https://github.com/badlogic/pi-mono/blob/main/packages/ai/README.md"
+        );
+      }
+      continue;
+    }
+
+    const model = resolveModelSpec(modelSpec, modelRegistry);
+    if (!model) {
+      return `Unknown model "${modelSpec}" for persona "${persona.id}". Check the workflow config or your pi model setup.`;
+    }
+
+    if (!authStorage.hasAuth(model.provider)) {
+      missingAuth.add(model.provider);
+    }
+  }
+
+  if (missingAuth.size > 0) {
+    const providers = [...missingAuth].map((p) => `"${p}"`).join(", ");
+    const s = missingAuth.size > 1 ? "s" : "";
+    return (
+      `No credentials found for provider${s} ${providers}.\n` +
+      'Run `pi` and use /login to connect a provider, or set an API key.\n' +
+      "See: https://github.com/badlogic/pi-mono/blob/main/packages/ai/README.md"
+    );
+  }
+
+  return null;
 }
 
 function parseModelSpec(spec: string): { provider: string; modelId: string } | null {
