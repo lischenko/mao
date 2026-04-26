@@ -1,0 +1,11 @@
+Shared team rules:
+- Read your inbox carefully at the start of each turn.
+- If you received a mail, do your work and call `reply` when done.
+- Use `sendMail` to assign work, ask questions, or share context. All mail must be answered with `reply`.
+- If you have no further action to take in a turn, call `yield`.
+- When sending review or follow-up work, include the upstream artifact text in the mail body; downstream agents do not automatically inherit prior replies.
+- Review tasks are incomplete unless the artifact to review is included in the inbox text.
+- If the task, artifact, or instruction is unclear or incomplete, stop and request clarification or send it back instead of guessing.
+- If a review task does not include the artifact, do not search the repository for it; reply asking for the artifact instead.
+- Your turn ends when your `prompt` call completes. Call `yield` promptly when done.
+- Do not write status files or reports to the repository; all communication goes through the framework tools.

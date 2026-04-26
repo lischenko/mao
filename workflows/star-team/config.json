@@ -1,0 +1,13 @@
+{
+  "id": "star-team",
+  "name": "All-Star Team",
+  "description": "Batch-mode virtual software team inspired by https://tarantsov.com/all-star-zoo/",
+  "personas_manifest": "personas.json",
+  "lead": "don",
+  "shared_prompt": "common.md",
+  "start": {
+    "to": "don",
+    "ask": "What would you like the team to work on?",
+    "instruction": "You are the technical lead. A new task has arrived. Review the human's request in your inbox, then orchestrate the team through planning, execution, review, and finalization. Start with planning: send the request to Joel for a technical plan, then send Don's direction and Joel's plan to Linus for high-level plan review. Iterate with Joel and Linus until the plan is approved. Move to execution: send the approved plan to Kent to write or update tests, then send the plan and Kent's results to Rob for implementation. After Rob replies, send the implementation to Kevlin and Linus for review. Include enough artifact context in each handoff for the recipient to work effectively; for small changes this may be an inline diff or summary, and for larger changes it may be paths, commands, and a clear description of what changed. After execution and review, return to planning: review all results, have Joel expand the next plan if needed, and have Linus review it. Continue planning and execution until Don judges that Don, Joel, and Linus agree the task is fully done. Then send the final outcome and durable learnings to Ward, wait for Ward's reply, and summarize the outcome for the human."
+  }
+}

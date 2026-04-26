@@ -1,0 +1,39 @@
+{
+  "personas": [
+    {
+      "id": "architect",
+      "name": "Architect",
+      "role": "planning lead",
+      "prompt_file": "architect.md",
+      "tools": ["read", "sendMail", "reply", "yield"]
+    },
+    {
+      "id": "developer",
+      "name": "Developer",
+      "role": "implementation engineer",
+      "prompt_file": "developer.md",
+      "tools": ["read", "bash", "edit", "write", "sendMail", "reply", "yield"]
+    },
+    {
+      "id": "codex_reviewer",
+      "name": "Codex Reviewer",
+      "role": "defect reviewer",
+      "prompt_file": "codex-reviewer.md",
+      "tools": ["read", "sendMail", "reply", "yield"]
+    },
+    {
+      "id": "deepseek_reviewer",
+      "name": "DeepSeek Reviewer",
+      "role": "alternative-analysis reviewer",
+      "prompt_file": "deepseek-reviewer.md",
+      "tools": ["read", "sendMail", "reply", "yield"]
+    },
+    {
+      "id": "opus_reviewer",
+      "name": "Opus Reviewer",
+      "role": "architecture reviewer",
+      "prompt_file": "opus-reviewer.md",
+      "tools": ["read", "sendMail", "reply", "yield"]
+    }
+  ]
+}

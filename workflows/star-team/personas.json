@@ -1,0 +1,53 @@
+{
+  "personas": [
+    {
+      "id": "don",
+      "name": "Don Melton",
+      "role": "tech lead",
+      "prompt_file": "don.md",
+      "tools": ["read", "bash", "edit", "write", "sendMail", "reply", "yield"]
+    },
+    {
+      "id": "joel",
+      "name": "Joel Spolsky",
+      "role": "implementation planner",
+      "prompt_file": "joel.md",
+      "tools": ["read", "sendMail", "reply", "yield"]
+    },
+    {
+      "id": "kent",
+      "name": "Kent Beck",
+      "role": "test engineer",
+      "prompt_file": "kent.md",
+      "tools": ["read", "bash", "edit", "write", "sendMail", "reply", "yield"]
+    },
+    {
+      "id": "rob",
+      "name": "Rob Pike",
+      "role": "implementation engineer",
+      "prompt_file": "rob.md",
+      "tools": ["read", "bash", "edit", "write", "sendMail", "reply", "yield"]
+    },
+    {
+      "id": "kevlin",
+      "name": "Kevlin Henney",
+      "role": "low-level reviewer",
+      "prompt_file": "kevlin.md",
+      "tools": ["read", "sendMail", "reply", "yield"]
+    },
+    {
+      "id": "linus",
+      "name": "Linus Torvalds",
+      "role": "high-level reviewer",
+      "prompt_file": "linus.md",
+      "tools": ["read", "sendMail", "reply", "yield"]
+    },
+    {
+      "id": "ward",
+      "name": "Ward Cunningham",
+      "role": "knowledge librarian",
+      "prompt_file": "ward.md",
+      "tools": ["read", "edit", "write", "sendMail", "reply", "yield"]
+    }
+  ]
+}

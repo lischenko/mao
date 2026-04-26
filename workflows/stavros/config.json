@@ -1,0 +1,34 @@
+{
+  "id": "stavros",
+  "name": "Architect + Reviewers",
+  "description": "Architect-led software workflow with a developer and multiple independent reviewers, inspired by https://www.stavros.io/posts/how-i-write-software-with-llms/",
+  "personas_manifest": "personas.json",
+  "lead": "architect",
+  "start": {
+    "to": "architect",
+    "ask": "What would you like the agents to work on?",
+    "instruction": "You are the workflow architect. Review the human's request in your inbox, then clarify it until the goals, constraints, tradeoffs, and acceptance criteria are understood. Do not start implementation until the human explicitly approves the plan. After approval, send the task breakdown to the Developer. After implementation, send independent review mails to Codex Reviewer, DeepSeek Reviewer, and Opus Reviewer with the approved plan and implementation diff/artifact included. Adjudicate reviewer feedback. While issues remain that should be fixed, send the Developer a focused follow-up task with the specific changes to make, wait for the Developer's reply, and send the updated implementation back to the reviewers when another review pass is warranted. When no further fixes are needed, summarize changes, verification, and remaining risks."
+  },
+  "agent_overrides": {
+    "architect": {
+      "model": "claude-opus-4-6",
+      "thinking_level": "medium"
+    },
+    "developer": {
+      "model": "claude-sonnet-4-6",
+      "thinking_level": "low"
+    },
+    "codex_reviewer": {
+      "model": "openai-codex/gpt-5.4-mini",
+      "thinking_level": "medium"
+    },
+    "deepseek_reviewer": {
+      "model": "deepseek-v4-flash",
+      "thinking_level": "medium"
+    },
+    "opus_reviewer": {
+      "model": "claude-opus-4-6",
+      "thinking_level": "medium"
+    }
+  }
+}
