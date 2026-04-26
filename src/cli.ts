@@ -85,9 +85,8 @@ Examples:
     db.upsertAgent(HUMAN_AGENT_ID, HUMAN_AGENT_ID);
 
     const leadId = workflow.lead;
-    const hasTurns = db.getAllAgents().some((a) => db.getTurnCount(a.id) > 0);
     const start = workflow.start ?? { to: leadId, ask: "What would you like to work on?" };
-    const canStart = !hasTurns && agentNeedsWork(db, start.to);
+    const canStart = agentNeedsWork(db, start.to);
 
     if (canStart) {
       const answer = await getStartAnswer(start.ask, opts.prompt);
