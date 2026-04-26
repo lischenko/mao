@@ -18,6 +18,12 @@ export interface OpenDbOptions {
   recoverInterruptedTurns?: boolean;
 }
 
+export interface TurnStats {
+  completed: number;
+  failed: number;
+  total: number;
+}
+
 export function openDb(projectDir: string, opts: OpenDbOptions = {}): Db {
   mkdirSync(projectDir, { recursive: true });
   const raw = new DatabaseSync(join(projectDir, "state.db"));
@@ -41,7 +47,8 @@ export function openDb(projectDir: string, opts: OpenDbOptions = {}): Db {
       created_at INTEGER NOT NULL,
       delivered_at INTEGER,
       replied_at INTEGER,
-      expects_reply INTEGER NOT NULL DEFAULT 0
+      expects_reply INTEGER NOT NULL DEFAULT 0,
+      produced_by_turn_id TEXT
     );
 
     CREATE TABLE IF NOT EXISTS turns (
@@ -50,6 +57,12 @@ export function openDb(projectDir: string, opts: OpenDbOptions = {}): Db {
       started_at INTEGER NOT NULL,
       ended_at INTEGER,
       status TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS turn_inbox (
+      turn_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      PRIMARY KEY (turn_id, message_id)
     );
   `);
   if (opts.recoverInterruptedTurns) {
@@ -132,14 +145,15 @@ export class Db {
     toAgent: AgentId,
     content: string,
     type: MessageType,
-    mailId?: MailId
+    mailId?: MailId,
+    producedByTurnId?: string
   ): MessageId {
     const id = randomUUID();
     const now = Date.now();
     this.raw.prepare(
-      `INSERT INTO mail (id, parent_id, from_agent, to_agent, content, type, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, mailId ?? null, fromAgent, toAgent, content, type, now);
+      `INSERT INTO mail (id, parent_id, from_agent, to_agent, content, type, created_at, produced_by_turn_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, mailId ?? null, fromAgent, toAgent, content, type, now, producedByTurnId ?? null);
     return id;
   }
 
@@ -169,18 +183,18 @@ export class Db {
 
   // --- open mail ---
 
-  openMail(fromAgent: AgentId, toAgent: AgentId, task: string): MailId {
+  openMail(fromAgent: AgentId, toAgent: AgentId, task: string, producedByTurnId?: string): MailId {
     const id = randomUUID();
     const now = Date.now();
     this.raw.prepare(
-      `INSERT INTO mail (id, from_agent, to_agent, content, type, created_at, expects_reply)
-       VALUES (?, ?, ?, ?, 'mail', ?, 1)`
-    ).run(id, fromAgent, toAgent, task, now);
+      `INSERT INTO mail (id, from_agent, to_agent, content, type, created_at, expects_reply, produced_by_turn_id)
+       VALUES (?, ?, ?, ?, 'mail', ?, 1, ?)`
+    ).run(id, fromAgent, toAgent, task, now, producedByTurnId ?? null);
     return id;
   }
 
-  sendMail(fromAgent: AgentId, toAgent: AgentId, content: string): MailId {
-    const mailId = this.openMail(fromAgent, toAgent, content);
+  sendMail(fromAgent: AgentId, toAgent: AgentId, content: string, producedByTurnId?: string): MailId {
+    const mailId = this.openMail(fromAgent, toAgent, content, producedByTurnId);
     this.setAgentStatus(toAgent, "ready", Date.now());
     return mailId;
   }
@@ -205,12 +219,12 @@ export class Db {
     ).run(Date.now(), mailId);
   }
 
-  replyToMail(mailId: MailId, fromAgent: AgentId, content: string): void {
+  replyToMail(mailId: MailId, fromAgent: AgentId, content: string, producedByTurnId?: string): void {
     const mail = this.getOpenMail(mailId);
     if (!mail) return;
 
     this.closeMail(mailId);
-    this.insertMessage(fromAgent, mail.fromAgent, content, "reply", mailId);
+    this.insertMessage(fromAgent, mail.fromAgent, content, "reply", mailId, producedByTurnId);
 
     const waiter = this.getAgent(mail.fromAgent);
     if (waiter && this.getWaitEdges(mail.fromAgent).length === 0) {
@@ -223,7 +237,8 @@ export class Db {
   getWaitEdges(agentId: AgentId): WaitEdge[] {
     return (
       this.raw.prepare(
-        `SELECT from_agent AS agent_id, to_agent AS waiting_for, id AS mail_id
+      `SELECT from_agent AS agent_id, to_agent AS waiting_for, id AS mail_id
+              , created_at
          FROM mail
          WHERE from_agent = ? AND expects_reply = 1 AND replied_at IS NULL`
       ).all(agentId) as any[]
@@ -233,7 +248,8 @@ export class Db {
   getAllWaitEdges(): WaitEdge[] {
     return (
       this.raw.prepare(
-        `SELECT from_agent AS agent_id, to_agent AS waiting_for, id AS mail_id
+      `SELECT from_agent AS agent_id, to_agent AS waiting_for, id AS mail_id
+              , created_at
          FROM mail
          WHERE expects_reply = 1 AND replied_at IS NULL`
       ).all() as any[]
@@ -250,6 +266,14 @@ export class Db {
     return id;
   }
 
+  recordTurnInbox(turnId: string, messageIds: MessageId[]): void {
+    if (messageIds.length === 0) return;
+    const stmt = this.raw.prepare(
+      "INSERT OR IGNORE INTO turn_inbox (turn_id, message_id) VALUES (?, ?)"
+    );
+    for (const messageId of messageIds) stmt.run(turnId, messageId);
+  }
+
   endTurn(turnId: string, status: "completed" | "failed"): void {
     this.raw.prepare(
       "UPDATE turns SET ended_at = ?, status = ? WHERE id = ?"
@@ -261,6 +285,22 @@ export class Db {
       "SELECT COUNT(*) as cnt FROM turns WHERE agent_id = ? AND status = 'completed'"
     ).get(agentId) as any;
     return row.cnt;
+  }
+
+  getTurnStats(agentId: AgentId): TurnStats {
+    const rows = this.raw.prepare(
+      `SELECT status, COUNT(*) as cnt
+       FROM turns
+       WHERE agent_id = ?
+       GROUP BY status`
+    ).all(agentId) as Array<{ status: string | null; cnt: number }>;
+    const stats: TurnStats = { completed: 0, failed: 0, total: 0 };
+    for (const row of rows) {
+      if (row.status === "completed") stats.completed = row.cnt;
+      else if (row.status === "failed") stats.failed = row.cnt;
+      stats.total += row.cnt;
+    }
+    return stats;
   }
 }
 
@@ -284,6 +324,7 @@ function rowToMessage(row: any): Message {
     createdAt: row.created_at,
     deliveredAt: row.delivered_at ?? null,
     mailId: row.parent_id ?? (row.expects_reply ? row.id : null),
+    producedByTurnId: row.produced_by_turn_id ?? null,
   };
 }
 
@@ -303,5 +344,6 @@ function rowToWait(row: any): WaitEdge {
     agentId: row.agent_id,
     waitingFor: row.waiting_for,
     mailId: row.mail_id,
+    createdAt: row.created_at,
   };
 }

@@ -43,8 +43,8 @@ export async function runHumanTurn(
 /**
  * Close any open mail to the human agent by routing the human's reply.
  */
-export function routeHumanReply(db: Db, replyContent: string): void {
+export function routeHumanReply(db: Db, replyContent: string, turnId?: string): void {
   const mail = db.getOpenMailTo(HUMAN_AGENT_ID);
   if (!mail) return;
-  db.replyToMail(mail.id, HUMAN_AGENT_ID, replyContent);
+  db.replyToMail(mail.id, HUMAN_AGENT_ID, replyContent, turnId);
 }

@@ -8,6 +8,8 @@ import { loadWorkflow, resolveWorkflowPath } from "./workflow.js";
 import { runScheduler } from "./scheduler.js";
 import { validateWorkflowModels } from "./runner.js";
 import { HUMAN_AGENT_ID } from "./human.js";
+import { buildProjectStatusSnapshot } from "./observability/read-model.js";
+import { renderProjectStatusText } from "./observability/render-status.js";
 import {
   inferProjectFromCwd,
   loadProjectConfig,
@@ -133,30 +135,16 @@ program
   .command("status")
   .description("Show agent statuses, inbox counts, and wait graph")
   .addOption(new Option("--project <name>", "Project name"))
-  .action((opts: { project?: string }) => {
+  .addOption(new Option("--verbose", "Show detailed status fields"))
+  .addOption(new Option("--json", "Print the shared status snapshot as JSON"))
+  .action((opts: { project?: string; verbose?: boolean; json?: boolean }) => {
     const name = resolveProjectOrDie(opts.project);
     const cfg = loadProjectConfig(name);
     const workflow = loadWorkflow(cfg.workflow);
     const db = openDb(projectDir(name));
-    const agents = db.getAllAgents();
-
-    console.log(`Project: ${name}  workflow: ${workflow.name} (${workflow.id})  repo: ${cfg.repo}`);
-    if (agents.length === 0) { console.log("No agents registered."); return; }
-
-    console.log("\nAgents:");
-    for (const agent of agents) {
-      const inbox = db.getUndeliveredMessages(agent.id).length;
-      const turns = db.getTurnCount(agent.id);
-      const waiting = db.getWaitEdges(agent.id);
-      const waitStr = waiting.length > 0 ? `  waiting=[${waiting.map((w) => w.waitingFor).join(",")}]` : "";
-      console.log(`  ${agent.id.padEnd(12)} ${agent.status.padEnd(8)}  inbox=${inbox}  turns=${turns}${waitStr}`);
-    }
-
-    const edges = db.getAllWaitEdges();
-    if (edges.length > 0) {
-      console.log("\nWait graph:");
-      for (const e of edges) console.log(`  ${e.agentId} → ${e.waitingFor}`);
-    }
+    const snapshot = buildProjectStatusSnapshot({ project: name, repo: cfg.repo, workflow, db });
+    if (opts.json) console.log(JSON.stringify(snapshot, null, 2));
+    else console.log(renderProjectStatusText(snapshot, { verbose: opts.verbose }));
   });
 
 // ---------------------------------------------------------------------------

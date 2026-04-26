@@ -22,6 +22,7 @@ export interface Message {
   createdAt: number;
   deliveredAt: number | null;
   mailId: MailId | null;
+  producedByTurnId: string | null;
 }
 
 export interface OpenMail {
@@ -37,6 +38,7 @@ export interface WaitEdge {
   agentId: AgentId;
   waitingFor: AgentId;
   mailId: MailId;
+  createdAt: number;
 }
 
 export interface PersonaConfig {
@@ -66,6 +68,7 @@ export interface WorkflowConfig {
 
 export interface TurnContext {
   agentId: AgentId;
+  turnId: string;
   activeMailId: MailId | null;
   pendingMail: Array<{ to: AgentId; mailId: MailId }>;
   replied: boolean;

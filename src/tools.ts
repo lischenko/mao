@@ -53,7 +53,7 @@ export function createFrameworkTools(db: Db, ctx: TurnContext) {
       const to = resolveAgentId(db, rawTo);
       if (!to) return unknownRecipientResult("sendMail", rawTo);
 
-      const mailId = db.sendMail(ctx.agentId, to, content);
+      const mailId = db.sendMail(ctx.agentId, to, content, ctx.turnId);
       ctx.pendingMail.push({ to: to as AgentId, mailId });
 
       return {

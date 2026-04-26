@@ -84,12 +84,13 @@ async function runOneTurn(
 
   try {
     const { inboxText, messages } = readInbox(db, agent.id, workflow);
+    db.recordTurnInbox(turnId, messages.map((message) => message.id));
 
     let response: string;
 
     if (agent.id === HUMAN_AGENT_ID) {
       response = await runHumanTurn(db, inboxText);
-      routeHumanReply(db, response);
+      routeHumanReply(db, response, turnId);
       setStatusAfterTurn(db, agent.id);
     } else {
       const persona = getPersona(workflow, agent.personaId);
@@ -97,7 +98,7 @@ async function runOneTurn(
         throw new Error(`No persona found for agent ${agent.id} (persona: ${agent.personaId})`);
       }
 
-      response = await runAgentTurn(db, projectDir, repoDir, agent.id, persona, workflow, inboxText, opts.modelOverride);
+      response = await runAgentTurn(db, projectDir, repoDir, agent.id, persona, workflow, inboxText, turnId, opts.modelOverride);
 
       setStatusAfterTurn(db, agent.id);
     }

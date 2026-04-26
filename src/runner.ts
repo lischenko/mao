@@ -23,6 +23,7 @@ export async function runAgentTurn(
   persona: PersonaConfig,
   workflow: WorkflowConfig,
   inboxText: string,
+  turnId: string,
   modelOverride?: string
 ): Promise<string> {
   const sessionsDir = join(projectDir, "sessions");
@@ -64,6 +65,7 @@ export async function runAgentTurn(
   const activeMail = db.getOpenMailTo(agentId);
   const ctx: TurnContext = {
     agentId,
+    turnId,
     activeMailId: activeMail?.id ?? null,
     pendingMail: [],
     replied: false,
@@ -123,13 +125,13 @@ export async function runAgentTurn(
   if (!ctx.replied && ctx.activeMailId && ctx.pendingMail.length === 0) {
     const mail = db.getOpenMail(ctx.activeMailId);
     if (mail) {
-      db.insertMessage("framework", agentId, formatMissingReplyProd(mail.id, mail.fromAgent), "framework", mail.id);
+      db.insertMessage("framework", agentId, formatMissingReplyProd(mail.id, mail.fromAgent), "framework", mail.id, turnId);
     }
   }
 
   // If the agent replied via the reply() tool, close the active mail and deliver the reply.
   if (ctx.replied && ctx.activeMailId) {
-    db.replyToMail(ctx.activeMailId, agentId, ctx.replyContent);
+    db.replyToMail(ctx.activeMailId, agentId, ctx.replyContent, turnId);
   }
 
   return response;
