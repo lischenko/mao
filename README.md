@@ -61,6 +61,7 @@ Plus whichever standard pi coding tools the workflow grants to that persona, com
 ```sh
 mao run [--project name] [--repo path] [--workflow id] [--model spec] [--parallel n] [--prompt text]
 mao status [--project name] [--verbose] [--json]
+mao ui     [--project name] [--host 127.0.0.1] [--port 4317]
 mao reset  [--project name] [--confirm]
 mao list
 ```
@@ -70,6 +71,8 @@ Project name is inferred when the current directory is inside a known project's 
 `--model` accepts pi's `provider/model:thinking` syntax as a run-wide model override. `--parallel` limits concurrent ready agents; the default is 8, and `--parallel 1` is useful for deterministic local testing.
 
 `mao status` shows a compact operational snapshot. Use `--verbose` for detailed counts and wait relationships, or `--json` to print the shared status snapshot used by observability integrations.
+
+`mao ui` starts a read-only, single-project observability API. `GET /api/status` returns the same shared status snapshot as `mao status --json`; `GET /api/health` reports API health.
 
 ## State
 

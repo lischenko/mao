@@ -10,6 +10,7 @@ import { validateWorkflowModels } from "./runner.js";
 import { HUMAN_AGENT_ID } from "./human.js";
 import { buildProjectStatusSnapshot } from "./observability/read-model.js";
 import { renderProjectStatusText } from "./observability/render-status.js";
+import { startObservabilityServer } from "./observability/server.js";
 import {
   inferProjectFromCwd,
   loadProjectConfig,
@@ -145,6 +146,42 @@ program
     const snapshot = buildProjectStatusSnapshot({ project: name, repo: cfg.repo, workflow, db });
     if (opts.json) console.log(JSON.stringify(snapshot, null, 2));
     else console.log(renderProjectStatusText(snapshot, { verbose: opts.verbose }));
+  });
+
+// ---------------------------------------------------------------------------
+// ui
+// ---------------------------------------------------------------------------
+
+program
+  .command("ui")
+  .description("Serve the read-only observability API for one project")
+  .addOption(new Option("--project <name>", "Project name"))
+  .addOption(new Option("--host <host>", "Host to bind").default("127.0.0.1"))
+  .addOption(new Option("--port <n>", "Port to listen on").default(4317).argParser(Number))
+  .action(async (opts: { project?: string; host: string; port: number }) => {
+    const name = resolveProjectOrDie(opts.project);
+    const cfg = loadProjectConfig(name);
+    const workflow = loadWorkflow(cfg.workflow);
+    const db = openDb(projectDir(name));
+
+    const { server, url } = await startObservabilityServer({
+      project: name,
+      repo: cfg.repo,
+      workflow,
+      db,
+      host: opts.host,
+      port: opts.port,
+    });
+
+    console.log(`[mao] observability API for '${name}' listening at ${url}`);
+    console.log(`[mao] status: ${url}/api/status`);
+
+    process.once("SIGINT", () => {
+      server.close(() => process.exit(0));
+    });
+    process.once("SIGTERM", () => {
+      server.close(() => process.exit(0));
+    });
   });
 
 // ---------------------------------------------------------------------------
