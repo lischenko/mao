@@ -93,10 +93,22 @@ export async function runAgentTurn(
     `\n  [${label}] session: ${session.model?.provider ?? "?"}/${session.model?.id ?? "?"} thinking=${session.thinkingLevel}`
   );
 
+  // Track whether the last assistant message was an error so we can fail the
+  // turn instead of silently retrying forever (e.g. rate-limit / quota errors).
+  let lastModelError: string | null = null;
+
   session.subscribe((event: any) => {
+    if (event.type === "message_end") {
+      const msg = event.message;
+      if (msg?.stopReason === "error" && msg?.errorMessage) {
+        lastModelError = msg.errorMessage;
+      }
+    }
     if (event.type === "message_update") {
       const ame = event.assistantMessageEvent;
-      if (ame?.type === "text_delta" || ame?.type === "thinking_delta") process.stdout.write(ame.delta);
+      if (ame?.type === "text_delta" || ame?.type === "thinking_delta") {
+        process.stdout.write(ame.delta);
+      }
     } else if (event.type === "compaction_start") {
       process.stdout.write(`\n  [${label}] compaction: ${event.reason ?? "unknown"} `);
     } else if (event.type === "compaction_end") {
@@ -119,6 +131,13 @@ export async function runAgentTurn(
   await session.prompt(turnPrompt);
 
   const response = session.getLastAssistantText() ?? "";
+
+  // If the model returned an API error and the agent didn't call any
+  // framework tools (reply / sendMail / yield), throw so the scheduler
+  // can enforce retry limits instead of looping forever.
+  if (lastModelError && !ctx.replied && ctx.pendingMail.length === 0 && !ctx.yielded) {
+    throw new Error(`Model error for ${agentId}: ${lastModelError}`);
+  }
 
   // If the model did not reply to active mail and did not delegate, wake it
   // with an explicit framework prod. Natural-language answers do not close mail;

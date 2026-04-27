@@ -210,6 +210,11 @@ h1 {
   border-left-color: var(--waiting);
 }
 
+.node.error {
+  border-left-color: var(--failed);
+  box-shadow: 0 0 0 2px rgba(180, 35, 24, 0.12), var(--shadow);
+}
+
 .node-header {
   display: flex;
   align-items: center;

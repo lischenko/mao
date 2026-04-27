@@ -268,6 +268,36 @@ export class Db {
     ).map(rowToWait);
   }
 
+  /**
+   * Auto-reply to all open mail sent TO the failing agent, close the mail,
+   * and wake up the senders so they can continue.
+   */
+  failOpenMailFor(agentId: AgentId, errorMessage: string, turnId?: string): void {
+    const openMail = this.raw.prepare(
+      `SELECT id, from_agent, to_agent, content
+       FROM mail
+       WHERE to_agent = ? AND expects_reply = 1 AND replied_at IS NULL`
+    ).all(agentId) as Array<{ id: MailId; from_agent: AgentId; to_agent: AgentId; content: string }>;
+
+    for (const mail of openMail) {
+      this.closeMail(mail.id);
+      const replyContent =
+        `## Automatic Framework Reply\n\n` +
+        `Agent \`${agentId}\` failed to process mail \`${mail.id}\`.\n\n` +
+        `**Task**: ${mail.content.slice(0, 200)}${mail.content.length > 200 ? "…" : ""}\n\n` +
+        `**Error**: ${errorMessage}\n\n` +
+        `The framework has closed this mail to prevent an infinite retry loop. ` +
+        `You may retry later or adjust the plan.`;
+      this.insertMessage(agentId, mail.from_agent, replyContent, "reply", mail.id, turnId);
+
+      // Wake up the sender.
+      const waiter = this.getAgent(mail.from_agent);
+      if (waiter && this.getWaitEdges(mail.from_agent).length === 0) {
+        this.setAgentStatus(mail.from_agent, "ready", Date.now());
+      }
+    }
+  }
+
   getCommunicationEdges(): CommunicationEdge[] {
     return (this.raw.prepare(
       `SELECT from_agent AS from_id, to_agent AS to_id, COUNT(*) AS count, MAX(created_at) AS last_at

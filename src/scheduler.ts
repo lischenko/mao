@@ -109,8 +109,14 @@ async function runOneTurn(
     onTurnEnd?.(agent.id, response);
   } catch (err) {
     db.endTurn(turnId, "failed");
-    db.setAgentStatus(agent.id, "idle");
-    console.error(`[mao] Turn failed for ${agent.id}:`, err);
+    const errMessage = err instanceof Error ? err.message : String(err);
+    console.error(`[mao] Turn failed for ${agent.id}:`, errMessage);
+
+    // Auto-reply to waiting agents and set this agent to error state.
+    // No retries — model errors (rate limits, auth, etc.) won't fix themselves.
+    db.failOpenMailFor(agent.id, errMessage, turnId);
+    db.setAgentStatus(agent.id, "error");
+    process.stdout.write(`\n  [mao] ${agent.id}: turn failed — status: error. ${errMessage}\n`);
   }
 }
 
@@ -128,7 +134,8 @@ function setStatusAfterTurn(db: Db, agentId: string): void {
 
 function refreshAgentStatuses(db: Db): void {
   for (const agent of db.getAllAgents()) {
-    if (agent.status === "running") continue;
+    // Never touch agents in error or running state.
+    if (agent.status === "running" || agent.status === "error") continue;
 
     if (db.getWaitEdges(agent.id).length > 0) {
       if (agent.status !== "waiting") db.setAgentStatus(agent.id, "waiting");

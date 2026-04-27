@@ -2,7 +2,7 @@ export type AgentId = string;
 export type MessageId = string;
 export type MailId = string;
 
-export type AgentStatus = "idle" | "ready" | "running" | "waiting";
+export type AgentStatus = "idle" | "ready" | "running" | "waiting" | "error";
 export type MessageType = "mail" | "reply" | "framework";
 
 export interface AgentRecord {

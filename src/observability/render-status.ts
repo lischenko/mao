@@ -17,8 +17,9 @@ function renderCompact(snapshot: ProjectStatusSnapshot): string {
   lines.push("", "Agents:");
   for (const agent of snapshot.agents) {
     const waiting = agent.waitingOn.length > 0 ? `  waiting=[${agent.waitingOn.join(",")}]` : "";
+    const error = agent.status === "error" ? `  ⚠️` : "";
     lines.push(
-      `  ${agent.id.padEnd(12)} ${agent.status.padEnd(8)}  inbox=${agent.inbox}  turns=${agent.turns.completed}${waiting}`
+      `  ${agent.id.padEnd(12)} ${agent.status.padEnd(8)}  inbox=${agent.inbox}  turns=${agent.turns.completed}${waiting}${error}`
     );
   }
 
@@ -64,9 +65,9 @@ function renderVerboseAgent(lines: string[], agent: AgentStatusView): void {
     lines.push(`    persona: ${parts.join(" - ")}`);
   }
   lines.push(`    status: ${agent.status}`);
-  lines.push(`    inbox: ${agent.inbox}`);
+  const failureInfo = agent.turns.failed > 0 ? ` failed=${agent.turns.failed}` : "";
   lines.push(
-    `    turns: completed=${agent.turns.completed} failed=${agent.turns.failed} total=${agent.turns.total}`
+    `    turns: completed=${agent.turns.completed}${failureInfo} total=${agent.turns.total}`
   );
   lines.push(`    waiting_on: ${agent.waitingOn.length > 0 ? agent.waitingOn.join(", ") : "none"}`);
   lines.push(`    waited_on_by: ${agent.waitedOnBy.length > 0 ? agent.waitedOnBy.join(", ") : "none"}`);

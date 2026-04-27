@@ -70,6 +70,7 @@ export interface StatusTotals {
   ready: number;
   running: number;
   waiting: number;
+  error: number;
   inbox: number;
   openMail: number;
   completedTurns: number;
@@ -134,6 +135,7 @@ export function buildProjectStatusSnapshot(args: {
     ready: 0,
     running: 0,
     waiting: 0,
+    error: 0,
     inbox: 0,
     openMail: waitEdges.length,
     completedTurns: 0,
