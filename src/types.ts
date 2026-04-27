@@ -73,4 +73,5 @@ export interface TurnContext {
   pendingMail: Array<{ to: AgentId; mailId: MailId }>;
   replied: boolean;
   replyContent: string;
+  yielded: boolean;
 }

@@ -70,6 +70,7 @@ export async function runAgentTurn(
     pendingMail: [],
     replied: false,
     replyContent: "",
+    yielded: false,
   };
 
   const customTools = createFrameworkTools(db, ctx);
@@ -129,12 +130,29 @@ export async function runAgentTurn(
     }
   }
 
+  // Plain assistant text is visible in the terminal/session log, but it does
+  // not affect orchestration. Require an explicit tool call so workflows do not
+  // silently finish when an agent meant to send mail.
+  if (!ctx.activeMailId && ctx.pendingMail.length === 0 && !ctx.replied && !ctx.yielded) {
+    db.insertMessage("framework", agentId, formatMissingActionProd(), "framework", undefined, turnId);
+  }
+
   // If the agent replied via the reply() tool, close the active mail and deliver the reply.
   if (ctx.replied && ctx.activeMailId) {
     db.replyToMail(ctx.activeMailId, agentId, ctx.replyContent, turnId);
   }
 
   return response;
+}
+
+function formatMissingActionProd(): string {
+  return (
+    `## Framework Reminder: Action Required\n\n` +
+    `Your previous turn ended without calling a framework tool.\n\n` +
+    `Ordinary assistant text is only a local transcript entry; it is not delivered to another agent ` +
+    `and it does not change scheduler state. If you intended to ask or tell another agent something, ` +
+    `call \`sendMail({ to: ..., content: ... })\`. If you are genuinely done for now, call \`yield()\`.`
+  );
 }
 
 function formatMissingReplyProd(mailId: MailId, senderId: AgentId): string {

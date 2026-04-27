@@ -125,6 +125,8 @@ export function createFrameworkTools(db: Db, ctx: TurnContext) {
         };
       }
 
+      ctx.yielded = true;
+
       return {
         content: [{ type: "text" as const, text: "Yielded control to the framework." }],
         details: {},
