@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>mao observability</title>
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="identity">
+          <h1 id="project-name">mao</h1>
+          <p id="project-meta"></p>
+        </div>
+        <div class="connection" id="connection-state">Connecting</div>
+      </header>
+
+      <section class="summary" id="summary"></section>
+
+      <section class="workspace">
+        <div class="graph-wrap">
+          <svg class="edges" id="edges" aria-hidden="true"></svg>
+          <div class="nodes" id="nodes"></div>
+          <div class="empty" id="empty-state">No agents registered</div>
+        </div>
+
+        <aside class="details" id="details">
+          <h2>Agent</h2>
+          <dl id="agent-fields"></dl>
+        </aside>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

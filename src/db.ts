@@ -21,7 +21,19 @@ export interface OpenDbOptions {
 export interface TurnStats {
   completed: number;
   failed: number;
+  running: number;
   total: number;
+  currentStartedAt: number | null;
+  lastStartedAt: number | null;
+  lastEndedAt: number | null;
+  totalDurationMs: number;
+}
+
+export interface CommunicationEdge {
+  from: AgentId;
+  to: AgentId;
+  count: number;
+  lastAt: number;
 }
 
 export function openDb(projectDir: string, opts: OpenDbOptions = {}): Db {
@@ -256,6 +268,24 @@ export class Db {
     ).map(rowToWait);
   }
 
+  getCommunicationEdges(): CommunicationEdge[] {
+    return (this.raw.prepare(
+      `SELECT from_agent AS from_id, to_agent AS to_id, COUNT(*) AS count, MAX(created_at) AS last_at
+       FROM mail
+       WHERE type = 'mail'
+         AND from_agent IN (SELECT id FROM agents)
+         AND to_agent IN (SELECT id FROM agents)
+       GROUP BY from_agent, to_agent
+       ORDER BY last_at DESC`
+    ).all() as Array<{ from_id: AgentId; to_id: AgentId; count: number; last_at: number }>)
+      .map((row) => ({
+        from: row.from_id,
+        to: row.to_id,
+        count: row.count,
+        lastAt: row.last_at,
+      }));
+  }
+
   // --- turns ---
 
   startTurn(agentId: AgentId): string {
@@ -289,16 +319,36 @@ export class Db {
 
   getTurnStats(agentId: AgentId): TurnStats {
     const rows = this.raw.prepare(
-      `SELECT status, COUNT(*) as cnt
+      `SELECT status, started_at, ended_at
        FROM turns
-       WHERE agent_id = ?
-       GROUP BY status`
-    ).all(agentId) as Array<{ status: string | null; cnt: number }>;
-    const stats: TurnStats = { completed: 0, failed: 0, total: 0 };
+       WHERE agent_id = ?`
+    ).all(agentId) as Array<{ status: string | null; started_at: number; ended_at: number | null }>;
+    const stats: TurnStats = {
+      completed: 0,
+      failed: 0,
+      running: 0,
+      total: 0,
+      currentStartedAt: null,
+      lastStartedAt: null,
+      lastEndedAt: null,
+      totalDurationMs: 0,
+    };
+    const now = Date.now();
     for (const row of rows) {
-      if (row.status === "completed") stats.completed = row.cnt;
-      else if (row.status === "failed") stats.failed = row.cnt;
-      stats.total += row.cnt;
+      if (row.status === "completed") stats.completed++;
+      else if (row.status === "failed") stats.failed++;
+      if (row.ended_at === null) {
+        stats.running++;
+        stats.currentStartedAt = stats.currentStartedAt === null
+          ? row.started_at
+          : Math.min(stats.currentStartedAt, row.started_at);
+        stats.totalDurationMs += now - row.started_at;
+      } else {
+        stats.totalDurationMs += row.ended_at - row.started_at;
+        stats.lastEndedAt = stats.lastEndedAt === null ? row.ended_at : Math.max(stats.lastEndedAt, row.ended_at);
+      }
+      stats.lastStartedAt = stats.lastStartedAt === null ? row.started_at : Math.max(stats.lastStartedAt, row.started_at);
+      stats.total++;
     }
     return stats;
   }

@@ -72,7 +72,7 @@ Project name is inferred when the current directory is inside a known project's 
 
 `mao status` shows a compact operational snapshot. Use `--verbose` for detailed counts and wait relationships, or `--json` to print the shared status snapshot used by observability integrations.
 
-`mao ui` starts a read-only, single-project observability API. `GET /api/status` returns the same shared status snapshot as `mao status --json`; `GET /api/health` reports API health.
+`mao ui` starts a read-only, single-project observability UI at `/`. `GET /api/status` returns the same shared status snapshot as `mao status --json`; `GET /api/health` reports API health.
 
 ## State
 

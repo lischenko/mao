@@ -4,7 +4,7 @@
   "description": "Minimal agent orchestration framework on top of pi",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-static.mjs",
     "dev": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit"
   },

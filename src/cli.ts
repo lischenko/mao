@@ -142,8 +142,9 @@ program
     const name = resolveProjectOrDie(opts.project);
     const cfg = loadProjectConfig(name);
     const workflow = loadWorkflow(cfg.workflow);
-    const db = openDb(projectDir(name));
-    const snapshot = buildProjectStatusSnapshot({ project: name, repo: cfg.repo, workflow, db });
+    const dir = projectDir(name);
+    const db = openDb(dir);
+    const snapshot = buildProjectStatusSnapshot({ project: name, projectDir: dir, repo: cfg.repo, workflow, db });
     if (opts.json) console.log(JSON.stringify(snapshot, null, 2));
     else console.log(renderProjectStatusText(snapshot, { verbose: opts.verbose }));
   });
@@ -162,11 +163,13 @@ program
     const name = resolveProjectOrDie(opts.project);
     const cfg = loadProjectConfig(name);
     const workflow = loadWorkflow(cfg.workflow);
-    const db = openDb(projectDir(name));
+    const dir = projectDir(name);
+    const db = openDb(dir);
 
     const { server, url } = await startObservabilityServer({
       project: name,
       repo: cfg.repo,
+      projectDir: dir,
       workflow,
       db,
       host: opts.host,

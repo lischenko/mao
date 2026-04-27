@@ -1,4 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Db } from "../db.js";
 import type { WorkflowConfig } from "../types.js";
 import { buildProjectStatusSnapshot } from "./read-model.js";
@@ -6,6 +9,7 @@ import { buildProjectStatusSnapshot } from "./read-model.js";
 export interface ObservabilityServerOptions {
   project: string;
   repo: string;
+  projectDir?: string;
   workflow: WorkflowConfig;
   db: Db;
   host?: string;
@@ -53,7 +57,22 @@ function handleRequest(req: IncomingMessage, res: ServerResponse, opts: Observab
     return;
   }
 
-  if (url.pathname === "/" || url.pathname === "/api") {
+  if (url.pathname === "/") {
+    sendStatic(res, "index.html", "text/html; charset=utf-8");
+    return;
+  }
+
+  if (url.pathname === "/app.js") {
+    sendStatic(res, "app.js", "text/javascript; charset=utf-8");
+    return;
+  }
+
+  if (url.pathname === "/style.css") {
+    sendStatic(res, "style.css", "text/css; charset=utf-8");
+    return;
+  }
+
+  if (url.pathname === "/api") {
     sendJson(res, 200, {
       name: "mao observability",
       project: opts.project,
@@ -70,6 +89,7 @@ function handleRequest(req: IncomingMessage, res: ServerResponse, opts: Observab
   if (url.pathname === "/api/status") {
     sendJson(res, 200, buildProjectStatusSnapshot({
       project: opts.project,
+      projectDir: opts.projectDir,
       repo: opts.repo,
       workflow: opts.workflow,
       db: opts.db,
@@ -96,6 +116,32 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
     "Content-Length": Buffer.byteLength(text),
   });
   res.end(text);
+}
+
+function sendStatic(res: ServerResponse, fileName: "index.html" | "app.js" | "style.css", contentType: string): void {
+  const path = resolveStaticFile(fileName);
+  if (!path) {
+    sendJson(res, 500, { error: `static asset not found: ${fileName}` });
+    return;
+  }
+
+  const body = readFileSync(path);
+  setCorsHeaders(res);
+  res.writeHead(200, {
+    "Content-Type": contentType,
+    "Content-Length": body.length,
+    "Cache-Control": "no-store",
+  });
+  res.end(body);
+}
+
+function resolveStaticFile(fileName: string): string | null {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    join(here, "static", fileName),
+    join(process.cwd(), "src", "observability", "static", fileName),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
 function setCorsHeaders(res: ServerResponse): void {
