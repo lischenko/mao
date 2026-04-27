@@ -1,10 +1,12 @@
-# mao
-
-**Minimal Agent Orchestration Framework On Top Of Pi**
+# mao - Minimal Agent Orchestration
 
 `mao` is a local CLI for running a persistent team of coding agents against a repository. Agents communicate through framework-managed mail, and `mao` schedules them until the workflow finishes, blocks on another agent, or asks the human for input.
 
-The project is experimental, unstable, and mostly built for my own education. It is vibe-coded and intentionally small. The interesting part is the orchestration model: agents have durable sessions, mail creates blocking waits, and those waits implicitly form a dynamic dependency graph. The implementation is built on [`@mariozechner/pi-coding-agent`](https://github.com/badlogic/pi-mono).
+The project is experimental, unstable, and mostly built for my own education. It is vibe-coded and intentionally small. The interesting part is the orchestration model: agents have durable sessions, mail creates blocking waits, and those waits implicitly form a dynamic dependency graph.
+
+![Agent orchestration graph](docs/graph.png)
+
+The implementation has an intentionally strong dependency on [`@mariozechner/pi-coding-agent`](https://github.com/badlogic/pi-mono).
 
 ## Quick Start
 
