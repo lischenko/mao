@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Db } from "../db.js";
 import type { WorkflowConfig } from "../types.js";
-import { buildProjectStatusSnapshot } from "./read-model.js";
+import { buildProjectStatusSnapshot, readAgentSession } from "./read-model.js";
 
 export interface ObservabilityServerOptions {
   project: string;
@@ -62,8 +62,8 @@ function handleRequest(req: IncomingMessage, res: ServerResponse, opts: Observab
     return;
   }
 
-  if (url.pathname === "/app.js") {
-    sendStatic(res, "app.js", "text/javascript; charset=utf-8");
+  if (/^\/[\w.-]+\.js$/.test(url.pathname)) {
+    sendStatic(res, url.pathname.slice(1), "text/javascript; charset=utf-8");
     return;
   }
 
@@ -76,7 +76,7 @@ function handleRequest(req: IncomingMessage, res: ServerResponse, opts: Observab
     sendJson(res, 200, {
       name: "mao observability",
       project: opts.project,
-      endpoints: ["/api/health", "/api/status"],
+      endpoints: ["/api/health", "/api/status", "/api/agents/:id/session"],
     });
     return;
   }
@@ -97,7 +97,29 @@ function handleRequest(req: IncomingMessage, res: ServerResponse, opts: Observab
     return;
   }
 
+  const sessionMatch = /^\/api\/agents\/([^/]+)\/session$/.exec(url.pathname);
+  if (sessionMatch) {
+    const agentId = sessionMatch[1];
+    if (!/^[\w-]+$/.test(agentId)) {
+      sendJson(res, 400, { error: "invalid agent id" });
+      return;
+    }
+    const after = parseIntParam(url.searchParams.get("after"));
+    const limit = parseIntParam(url.searchParams.get("limit"));
+    sendJson(res, 200, readAgentSession(opts.projectDir, agentId, {
+      after: after ?? undefined,
+      ...(limit !== null && { limit }),
+    }));
+    return;
+  }
+
   sendJson(res, 404, { error: "not found" });
+}
+
+function parseIntParam(value: string | null): number | null {
+  if (value === null) return null;
+  const n = parseInt(value, 10);
+  return Number.isFinite(n) ? n : null;
 }
 
 function sendOptions(res: ServerResponse): void {
@@ -118,7 +140,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(text);
 }
 
-function sendStatic(res: ServerResponse, fileName: "index.html" | "app.js" | "style.css", contentType: string): void {
+function sendStatic(res: ServerResponse, fileName: string, contentType: string): void {
   const path = resolveStaticFile(fileName);
   if (!path) {
     sendJson(res, 500, { error: `static asset not found: ${fileName}` });

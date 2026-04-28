@@ -9,29 +9,28 @@
   <body>
     <main class="shell">
       <header class="topbar">
-        <div class="identity">
-          <h1 id="project-name">mao</h1>
-          <p id="project-meta"></p>
-        </div>
-        <div class="connection" id="connection-state">Connecting</div>
+        <h1 id="project-name">mao</h1>
+        <span id="project-meta"></span>
+        <span id="status-counts" class="status-counts"></span>
+        <span class="connection" id="connection-state">connecting</span>
       </header>
 
-      <section class="summary" id="summary"></section>
-
-      <section class="workspace">
-        <div class="graph-wrap">
-          <svg class="edges" id="edges" aria-hidden="true"></svg>
-          <div class="nodes" id="nodes"></div>
-          <div class="empty" id="empty-state">No agents registered</div>
-        </div>
-
-        <aside class="details" id="details">
-          <h2>Agent</h2>
-          <dl id="agent-fields"></dl>
+      <div class="workspace" id="workspace">
+        <aside class="sidebar">
+          <div class="graph-wrap">
+            <svg id="graph-svg" class="graph-svg"></svg>
+            <p class="empty hidden" id="empty-state">No agents</p>
+          </div>
         </aside>
-      </section>
+
+        <section class="main-panel">
+          <div id="panels-container" class="panels-container"></div>
+        </section>
+
+        <svg id="connector-overlay" class="connector-overlay" aria-hidden="true"></svg>
+      </div>
     </main>
 
-    <script src="/app.js"></script>
+    <script type="module" src="/app.js"></script>
   </body>
 </html>

@@ -7,7 +7,7 @@ import {
   SessionManager,
   getAgentDir,
 } from "@mariozechner/pi-coding-agent";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import type { Db } from "./db.js";
@@ -30,6 +30,8 @@ export async function runAgentTurn(
   mkdirSync(sessionsDir, { recursive: true });
 
   const sessionFile = join(sessionsDir, `${agentId}.jsonl`);
+  const liveSessionFile = join(sessionsDir, `${agentId}.live.json`);
+  rmSync(liveSessionFile, { force: true });
 
   // SessionManager backed by the agent's persistent session file.
   // cwd is repoDir so the agent's tools (read/bash/edit/write) operate on the repo.
@@ -96,6 +98,7 @@ export async function runAgentTurn(
   // Track whether the last assistant message was an error so we can fail the
   // turn instead of silently retrying forever (e.g. rate-limit / quota errors).
   let lastModelError: string | null = null;
+  const streamingToolArgs = new Map<number, { name: string; chars: number; lastPrinted: number }>();
 
   session.subscribe((event: any) => {
     if (event.type === "message_end") {
@@ -108,7 +111,10 @@ export async function runAgentTurn(
       const ame = event.assistantMessageEvent;
       if (ame?.type === "text_delta" || ame?.type === "thinking_delta") {
         process.stdout.write(ame.delta);
+      } else if (ame?.type === "toolcall_delta") {
+        printToolCallDeltaProgress(label, streamingToolArgs, event);
       }
+      writeLiveSessionUpdate(liveSessionFile, agentId, turnId, event);
     } else if (event.type === "compaction_start") {
       process.stdout.write(`\n  [${label}] compaction: ${event.reason ?? "unknown"} `);
     } else if (event.type === "compaction_end") {
@@ -128,7 +134,11 @@ export async function runAgentTurn(
 
   const turnPrompt = buildTurnPrompt(db, agentId, persona, workflow, inboxText, allowedTools, activeMail ?? null);
   process.stdout.write(`\n  [${label}] waiting for response... `);
-  await session.prompt(turnPrompt);
+  try {
+    await session.prompt(turnPrompt);
+  } finally {
+    rmSync(liveSessionFile, { force: true });
+  }
 
   const response = session.getLastAssistantText() ?? "";
 
@@ -162,6 +172,51 @@ export async function runAgentTurn(
   }
 
   return response;
+}
+
+function printToolCallDeltaProgress(
+  label: string,
+  streamingToolArgs: Map<number, { name: string; chars: number; lastPrinted: number }>,
+  event: any,
+): void {
+  const ame = event.assistantMessageEvent;
+  const index = typeof ame?.contentIndex === "number" ? ame.contentIndex : -1;
+  const block = index >= 0 ? event.message?.content?.[index] : undefined;
+  const name = block?.name ?? "tool";
+  const state = streamingToolArgs.get(index) ?? { name, chars: 0, lastPrinted: 0 };
+  state.name = name;
+  state.chars += typeof ame?.delta === "string" ? ame.delta.length : 0;
+
+  const shouldPrint = state.lastPrinted === 0 || state.chars - state.lastPrinted >= 2048;
+  if (shouldPrint) {
+    process.stdout.write(`\n  [${label}] ${state.name} args streaming ${formatCompactNumber(state.chars)} chars `);
+    state.lastPrinted = state.chars;
+  }
+  streamingToolArgs.set(index, state);
+}
+
+function formatCompactNumber(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`;
+  if (value >= 1_000) return `${Math.round(value / 1_000)}k`;
+  return String(value);
+}
+
+function writeLiveSessionUpdate(liveSessionFile: string, agentId: AgentId, turnId: string, event: any): void {
+  if (!event.message) return;
+  const payload = {
+    agentId,
+    turnId,
+    timestamp: new Date().toISOString(),
+    message: event.message,
+    assistantMessageEvent: event.assistantMessageEvent,
+  };
+  try {
+    const tempFile = `${liveSessionFile}.tmp`;
+    writeFileSync(tempFile, JSON.stringify(payload));
+    renameSync(tempFile, liveSessionFile);
+  } catch {
+    // Observability must not interfere with agent execution.
+  }
 }
 
 function formatMissingActionProd(): string {

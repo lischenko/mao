@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Message } from "@mariozechner/pi-ai";
 import type { Db, TurnStats } from "../db.js";
 import type { AgentStatus, WorkflowConfig } from "../types.js";
 import { getPersona } from "../workflow.js";
@@ -44,7 +45,9 @@ export interface AgentActivityView {
   outputTokens: number;
   totalTokens: number;
   totalCost: number;
+  firstAt: number | null;
   lastAt: number | null;
+  durationMs: number;
   lastKind: string | null;
   lastLabel: string | null;
 }
@@ -76,6 +79,26 @@ export interface StatusTotals {
   completedTurns: number;
   failedTurns: number;
   totalTurns: number;
+  firstAt: number | null;
+  lastAt: number | null;
+  durationMs: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  totalCost: number;
+}
+
+export interface SessionEventView {
+  index: number;
+  timestamp: string | null;
+  message: Message;
+  live?: boolean;
+}
+
+export interface AgentSessionData {
+  agentId: string;
+  total: number;
+  events: SessionEventView[];
 }
 
 export function buildProjectStatusSnapshot(args: {
@@ -141,6 +164,13 @@ export function buildProjectStatusSnapshot(args: {
     completedTurns: 0,
     failedTurns: 0,
     totalTurns: 0,
+    firstAt: null,
+    lastAt: null,
+    durationMs: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    totalCost: 0,
   };
 
   for (const agent of views) {
@@ -149,6 +179,19 @@ export function buildProjectStatusSnapshot(args: {
     totals.completedTurns += agent.turns.completed;
     totals.failedTurns += agent.turns.failed;
     totals.totalTurns += agent.turns.total;
+    totals.inputTokens += agent.activity.inputTokens;
+    totals.outputTokens += agent.activity.outputTokens;
+    totals.totalTokens += agent.activity.totalTokens;
+    totals.totalCost += agent.activity.totalCost;
+    if (agent.activity.firstAt !== null && (totals.firstAt === null || agent.activity.firstAt < totals.firstAt)) {
+      totals.firstAt = agent.activity.firstAt;
+    }
+    if (agent.activity.lastAt !== null && (totals.lastAt === null || agent.activity.lastAt > totals.lastAt)) {
+      totals.lastAt = agent.activity.lastAt;
+    }
+  }
+  if (totals.firstAt !== null && totals.lastAt !== null) {
+    totals.durationMs = Math.max(0, totals.lastAt - totals.firstAt);
   }
 
   return {
@@ -190,7 +233,9 @@ function readAgentActivity(projectDir: string | undefined, agentId: string): Age
     outputTokens: 0,
     totalTokens: 0,
     totalCost: 0,
+    firstAt: null,
     lastAt: null,
+    durationMs: 0,
     lastKind: null,
     lastLabel: null,
   };
@@ -209,6 +254,9 @@ function readAgentActivity(projectDir: string | undefined, agentId: string): Age
     }
     activity.sessionEvents++;
     const at = parseTimestamp(event.timestamp);
+    if (at !== null && (activity.firstAt === null || at < activity.firstAt)) {
+      activity.firstAt = at;
+    }
     if (at !== null && (activity.lastAt === null || at >= activity.lastAt)) {
       activity.lastAt = at;
       activity.lastKind = event.type ?? null;
@@ -235,6 +283,10 @@ function readAgentActivity(projectDir: string | undefined, agentId: string): Age
       else if (item?.type === "text") activity.textBlocks++;
       else if (item?.type === "toolCall") activity.toolCalls++;
     }
+  }
+
+  if (activity.firstAt !== null && activity.lastAt !== null) {
+    activity.durationMs = Math.max(0, activity.lastAt - activity.firstAt);
   }
 
   return activity;
@@ -264,4 +316,76 @@ function parseTimestamp(value: unknown): number | null {
 
 function numberValue(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+export function readAgentSession(
+  projectDir: string | undefined,
+  agentId: string,
+  opts: { after?: number; limit?: number } = {},
+): AgentSessionData {
+  if (!projectDir) return { agentId, total: 0, events: [] };
+
+  const sessionFile = join(projectDir, "sessions", `${agentId}.jsonl`);
+  const lines = existsSync(sessionFile)
+    ? readFileSync(sessionFile, "utf-8").split(/\n/).filter(Boolean)
+    : [];
+  const total = lines.length;
+  const events: SessionEventView[] = [];
+
+  const limit = opts.limit ?? total;
+
+  let indices: number[];
+  if (opts.after !== undefined) {
+    const start = opts.after + 1;
+    indices = Array.from({ length: Math.min(limit, Math.max(0, total - start)) }, (_, i) => start + i);
+  } else {
+    const start = Math.max(0, total - limit);
+    indices = Array.from({ length: total - start }, (_, i) => start + i);
+  }
+
+  for (const index of indices) {
+    let parsed: any;
+    try {
+      parsed = JSON.parse(lines[index]);
+    } catch {
+      continue;
+    }
+    if (parsed.type !== "message" || !parsed.message) continue;
+    events.push({
+      index,
+      timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : null,
+      message: parsed.message,
+    });
+  }
+
+  const liveEvent = readLiveSessionEvent(projectDir, agentId, total);
+  if (liveEvent && (opts.after === undefined || liveEvent.index > opts.after)) {
+    events.push(liveEvent);
+  }
+
+  return { agentId, total, events };
+}
+
+function readLiveSessionEvent(
+  projectDir: string,
+  agentId: string,
+  index: number,
+): SessionEventView | null {
+  const liveFile = join(projectDir, "sessions", `${agentId}.live.json`);
+  if (!existsSync(liveFile)) return null;
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(readFileSync(liveFile, "utf-8"));
+  } catch {
+    return null;
+  }
+
+  if (!parsed.message || parsed.message.role !== "assistant") return null;
+  return {
+    index,
+    timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : null,
+    message: parsed.message,
+    live: true,
+  };
 }
