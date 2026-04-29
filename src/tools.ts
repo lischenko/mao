@@ -1,6 +1,7 @@
 import { defineTool } from "@mariozechner/pi-coding-agent";
+import { MailCycleError } from "./db.js";
 import type { Db } from "./db.js";
-import type { AgentId, TurnContext } from "./types.js";
+import type { AgentId, MailId, TurnContext } from "./types.js";
 
 const strParam = (description: string) => ({ type: "string" as const, description });
 
@@ -29,6 +30,8 @@ export function createFrameworkTools(db: Db, ctx: TurnContext) {
       "You may call this multiple times in one turn to send to several agents in parallel; " +
       "call yield() when you are done issuing mail for this turn. " +
       "You will be woken when all recipients have replied. " +
+      "If sending would create a circular dependency, the framework will refuse the message; " +
+      "reply to existing pending mail in the cycle instead. " +
       "Use this for task assignments, status updates, questions — any communication.",
     parameters: {
       type: "object" as const,
@@ -53,7 +56,33 @@ export function createFrameworkTools(db: Db, ctx: TurnContext) {
       const to = resolveAgentId(db, rawTo);
       if (!to) return unknownRecipientResult("sendMail", rawTo);
 
-      const mailId = db.sendMail(ctx.agentId, to, content, ctx.turnId);
+      let mailId: MailId;
+      try {
+        mailId = db.sendMail(ctx.agentId, to, content, ctx.turnId);
+      } catch (err) {
+        if (err instanceof MailCycleError) {
+          const activeMail = ctx.activeMailId ? db.getOpenMail(ctx.activeMailId) : null;
+          if (activeMail?.fromAgent === to) {
+            return {
+              content: [{
+                type: "text" as const,
+                text:
+                  `Error: you are currently answering active mail ${activeMail.id} from ${to}. ` +
+                  `Sending blocking mail back to that requester would create a circular dependency. ` +
+                  `If this message is your answer, call reply({ content: ... }) with this content instead. ` +
+                  `If you need clarification, reply with the question so ${to} can continue.`,
+              }],
+              details: { activeMailId: activeMail.id, requester: to },
+            };
+          }
+
+          return {
+            content: [{ type: "text" as const, text: err.message }],
+            details: { cycle: err.chain },
+          };
+        }
+        throw err;
+      }
       ctx.pendingMail.push({ to: to as AgentId, mailId });
 
       return {

@@ -13,6 +13,7 @@ import type {
   OpenMail,
   WaitEdge,
 } from "./types.js";
+import { findProspectiveWaitCycle, formatProspectiveWaitCycleRefusal } from "./graph.js";
 
 export interface OpenDbOptions {
   recoverInterruptedTurns?: boolean;
@@ -34,6 +35,13 @@ export interface CommunicationEdge {
   to: AgentId;
   count: number;
   lastAt: number;
+}
+
+export class MailCycleError extends Error {
+  constructor(readonly chain: AgentId[]) {
+    super(formatProspectiveWaitCycleRefusal({ chain }));
+    this.name = "MailCycleError";
+  }
 }
 
 export function openDb(projectDir: string, opts: OpenDbOptions = {}): Db {
@@ -206,6 +214,9 @@ export class Db {
   }
 
   sendMail(fromAgent: AgentId, toAgent: AgentId, content: string, producedByTurnId?: string): MailId {
+    const cycle = findProspectiveWaitCycle(this, fromAgent, toAgent);
+    if (cycle) throw new MailCycleError(cycle.chain);
+
     const mailId = this.openMail(fromAgent, toAgent, content, producedByTurnId);
     this.setAgentStatus(toAgent, "ready", Date.now());
     return mailId;
