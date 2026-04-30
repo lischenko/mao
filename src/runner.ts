@@ -1,12 +1,10 @@
 import {
-  createAgentSession,
-  DefaultResourceLoader,
-  AuthStorage,
+  createAgentSessionFromServices,
+  createAgentSessionServices,
   ModelRegistry,
-  SettingsManager,
   SessionManager,
-  getAgentDir,
 } from "@mariozechner/pi-coding-agent";
+import type { AgentSessionServices } from "@mariozechner/pi-coding-agent";
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
@@ -40,23 +38,10 @@ export async function runAgentTurn(
   const personaPrompt = readFileSync(persona.promptFile, "utf-8").trim();
   const systemPrompt = buildSystemPrompt(persona, personaPrompt, workflow);
 
-  // ResourceLoader: disable file-based context discovery; always set the persona
-  // prompt so resumed sessions keep their identity and framework instructions.
-  const agentDir = getAgentDir();
-  const settingsManager = SettingsManager.create(repoDir, agentDir);
-  const authStorage = AuthStorage.create();
-  const modelRegistry = ModelRegistry.create(authStorage);
-  const rlOptions: Record<string, unknown> = {
-    cwd: repoDir,
-    agentDir,
-    noContextFiles: true,
-    noExtensions: true,
-    noSkills: true,
-    noPromptTemplates: true,
-    systemPromptOverride: () => systemPrompt,
-  };
-  const resourceLoader = new DefaultResourceLoader(rlOptions as any);
-  await resourceLoader.reload();
+  const services = await createMaoPiServices(repoDir, systemPrompt);
+  assertNoPiServiceErrors(services);
+
+  const { modelRegistry } = services;
   const modelSpec = modelOverride ? parseModelFromOverride(modelOverride) : persona.model;
   const model = resolvePersonaModel(modelSpec, persona.id, modelRegistry);
   const thinkingLevel = modelOverride
@@ -78,17 +63,13 @@ export async function runAgentTurn(
   const customTools = createFrameworkTools(db, ctx);
   const allowedTools = getAllowedTools(persona);
 
-  const { session } = await createAgentSession({
-    cwd: repoDir,
+  const { session } = await createAgentSessionFromServices({
+    services,
     sessionManager,
-    resourceLoader,
-    customTools,
     tools: allowedTools,
+    customTools,
     model,
     thinkingLevel,
-    authStorage,
-    modelRegistry,
-    settingsManager,
   });
   const label = `${agentId} (${persona.name})`;
   process.stdout.write(
@@ -268,10 +249,14 @@ function resolvePersonaModel(modelSpec: string | undefined, personaId: string, m
  */
 export async function validateWorkflowModels(
   workflow: WorkflowConfig,
+  repoDir: string,
   modelOverride?: string
 ): Promise<string | null> {
-  const authStorage = AuthStorage.create();
-  const modelRegistry = ModelRegistry.create(authStorage);
+  const services = await createMaoPiServices(repoDir);
+  const serviceError = formatPiServiceErrors(services);
+  if (serviceError) return serviceError;
+
+  const { modelRegistry } = services;
   const allModels = modelRegistry.getAll();
 
   if (allModels.length === 0) {
@@ -292,7 +277,7 @@ export async function validateWorkflowModels(
 
     if (!modelSpec) {
       // Persona has no model — pi picks its default. Check if *any* model has auth.
-      const anyAuth = allModels.some((m) => authStorage.hasAuth(m.provider));
+      const anyAuth = allModels.some((m) => modelRegistry.hasConfiguredAuth(m));
       if (!anyAuth) {
         return (
           "No API key or OAuth token configured for any provider in pi.\n" +
@@ -308,7 +293,7 @@ export async function validateWorkflowModels(
       return `Unknown model "${modelSpec}" for persona "${persona.id}". Check the workflow config or your pi model setup.`;
     }
 
-    if (!authStorage.hasAuth(model.provider)) {
+    if (!modelRegistry.hasConfiguredAuth(model)) {
       missingAuth.add(model.provider);
     }
   }
@@ -324,6 +309,35 @@ export async function validateWorkflowModels(
   }
 
   return null;
+}
+
+async function createMaoPiServices(repoDir: string, systemPrompt?: string): Promise<AgentSessionServices> {
+  return createAgentSessionServices({
+    cwd: repoDir,
+    resourceLoaderOptions: {
+      noContextFiles: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      systemPromptOverride: systemPrompt ? () => systemPrompt : undefined,
+    },
+  });
+}
+
+function assertNoPiServiceErrors(services: AgentSessionServices): void {
+  const error = formatPiServiceErrors(services);
+  if (error) throw new Error(error);
+}
+
+function formatPiServiceErrors(services: AgentSessionServices): string | null {
+  const diagnostics = services.diagnostics
+    .filter((diagnostic) => diagnostic.type === "error")
+    .map((diagnostic) => diagnostic.message);
+  const extensionErrors = services.resourceLoader.getExtensions().errors.map(
+    ({ path, error }: { path: string; error: unknown }) => `Failed to load extension "${path}": ${error}`
+  );
+  const errors = [...diagnostics, ...extensionErrors];
+  return errors.length > 0 ? errors.join("\n") : null;
 }
 
 function parseModelSpec(spec: string): { provider: string; modelId: string } | null {

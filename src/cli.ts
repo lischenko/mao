@@ -102,7 +102,7 @@ Examples:
     }
 
     // 4. Validate models before starting the scheduler
-    const modelError = await validateWorkflowModels(workflow, opts.model);
+    const modelError = await validateWorkflowModels(workflow, cfg.repo, opts.model);
     if (modelError) {
       console.error(`\n[mao] ${modelError}`);
       process.exit(1);
