@@ -88,6 +88,11 @@ Examples:
     for (const persona of workflow.personas) db.upsertAgent(persona.id, persona.id);
     db.upsertAgent(HUMAN_AGENT_ID, HUMAN_AGENT_ID);
 
+    const recoveredErrors = recoverErroredAgentsForRun(db);
+    if (recoveredErrors.length > 0) {
+      console.log(`[mao] recovered error agents: ${recoveredErrors.join(", ")}`);
+    }
+
     const leadId = workflow.lead;
     const start = workflow.start ?? { to: leadId, ask: "What would you like to work on?" };
     const canStart = agentNeedsWork(db, start.to);
@@ -251,6 +256,20 @@ function agentNeedsWork(db: ReturnType<typeof openDb>, agentId: string): boolean
   if (!agent) return true;
   if (agent.status !== "idle") return false;
   return db.getUndeliveredMessages(agentId).length === 0;
+}
+
+function recoverErroredAgentsForRun(db: ReturnType<typeof openDb>): string[] {
+  const recovered: string[] = [];
+  for (const agent of db.getAllAgents()) {
+    if (agent.status !== "error") continue;
+
+    const hasPendingWork =
+      db.hasUndeliveredMessages(agent.id) ||
+      db.getOpenMailTo(agent.id) !== null;
+    db.setAgentStatus(agent.id, hasPendingWork ? "ready" : "idle", hasPendingWork ? Date.now() : undefined);
+    recovered.push(agent.id);
+  }
+  return recovered;
 }
 
 async function getStartAnswer(question: string, promptArg?: string): Promise<string> {
