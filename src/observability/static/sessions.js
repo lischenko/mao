@@ -129,8 +129,10 @@ function buildSessionItems(events) {
 
 function renderSessionEvent(event) {
   const msg = event.message;
+  const label = eventLabel(event);
   const summary = el("summary", {},
-    el("span", { className: "sev-label", textContent: eventLabel(event) }),
+    el("span", { className: "sev-kind", textContent: label.kind }),
+    label.preview ? el("span", { className: "sev-preview", textContent: label.preview }) : null,
     event.timestamp ? el("time", {
       className: "sev-ts",
       textContent: new Date(event.timestamp).toLocaleTimeString([], {
@@ -180,19 +182,30 @@ function liveViewportPosition(list) {
 
 function eventLabel(event) {
   const msg = event.message;
-  if (event.live) return `${assistantLabel(msg)} ...`;
-  if (msg.role === "toolResult") return msg.toolName ?? "tool";
-  if (msg.role === "user") return preview(firstText(msg.content)) || "prompt";
-  if (msg.role !== "assistant") return msg.role ?? "";
+  if (event.live) {
+    const label = assistantLabel(msg);
+    return { ...label, preview: label.preview ? `${label.preview} ...` : "..." };
+  }
+  if (msg.role === "toolResult") return { kind: msg.toolName ?? "tool", preview: "" };
+  if (msg.role === "user") return userLabel(msg);
+  if (msg.role !== "assistant") return { kind: msg.role ?? "", preview: "" };
 
-  const parts = (msg.content ?? []).flatMap(blockLabel);
-  return parts.join(" · ") || "assistant";
+  return assistantLabel(msg);
 }
 
 function assistantLabel(msg) {
-  if (msg.role !== "assistant") return msg.role ?? "";
+  if (msg.role !== "assistant") return { kind: msg.role ?? "", preview: "" };
   const parts = (msg.content ?? []).flatMap(blockLabel);
-  return parts.join(" · ") || "assistant";
+  return { kind: "Assistant turn", preview: parts.join(" · ") };
+}
+
+function userLabel(msg) {
+  const text = firstText(msg.content);
+  if (text.startsWith("## Framework Turn Context")) {
+    return { kind: "Framework context", preview: preview(text) };
+  }
+  const textPreview = preview(text);
+  return { kind: "Prompt", preview: textPreview };
 }
 
 function blockLabel(block) {
@@ -238,7 +251,7 @@ function renderToolCall(block, event) {
     return el("div", { className: "sev-sendmail" },
       el("span", {
         className: "sev-sendmail-to",
-        textContent: `-> ${block.arguments?.to ?? block.arguments?.recipient ?? block.input?.to ?? "?"}`,
+        textContent: `Mail to ${block.arguments?.to ?? block.arguments?.recipient ?? block.input?.to ?? "?"}`,
       }),
       el("p", {
         className: "text-block",

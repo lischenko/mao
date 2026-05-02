@@ -275,17 +275,28 @@ h1 {
   align-self: center;
 }
 
-.sev-label {
+.sev-kind {
+  flex: 0 0 auto;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.sev-preview {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text);
+  color: var(--muted);
+}
+
+.sev[open] > summary .sev-preview {
+  display: none;
 }
 
 .sev-ts {
   flex: 0 0 auto;
+  margin-left: auto;
   color: var(--muted);
   font-size: 10px;
 }
