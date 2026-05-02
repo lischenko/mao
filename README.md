@@ -78,10 +78,12 @@ Project name is inferred when the current directory is inside a known project's 
 
 ## State
 
-All project state lives under `~/.mao/<project-name>/`:
+Project state lives under `.mao/<project-name>/` in the current directory or
+one of its parents when present. Otherwise, MAO falls back to
+`~/.mao/<project-name>/`:
 
 ```text
-~/.mao/<project-name>/
+.mao/<project-name>/
   config.json          # repo path + workflow id
   state.db             # SQLite: agents, mail, turns
   sessions/
