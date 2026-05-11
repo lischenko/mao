@@ -1,27 +1,50 @@
-import { els, setConnection } from "./dom.js";
-import { renderConnectors, renderGraph } from "./graph.js";
-import { applyPanelHeights, installPanelDrag, renderPanels } from "./panels.js";
+// Role: Orchestrator. Runs the refresh loop, wires modules together.
+// Boundary: The only module allowed to import from all others.
+
+import { els, setConnection, compactNumber } from "./dom.js";
+import { installPanelDrag, renderPanels } from "./panels.js";
 import { openPanels, PANEL_ORIGIN, state } from "./state.js";
+import { createTimeline } from "./timeline-grid.js";
+import { handleFocusTurn, setTurnSelectedHandler } from "./navigation.js";
+
+const timeline = createTimeline(document.getElementById("timeline"), {
+  onAgentClick: togglePanel,
+  onTurnClick: (agentId, turnId) => {
+    if (!openPanels.has(agentId)) {
+      openPanels.set(agentId, PANEL_ORIGIN.USER);
+      if (state.snapshot) renderApp(state.snapshot, state.turns);
+    }
+    handleFocusTurn(agentId, turnId);
+  },
+});
+
+setTurnSelectedHandler((turnId) => timeline.highlightTurn(turnId));
 
 async function refresh() {
   try {
-    const res = await fetch("/api/status", { cache: "no-store" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const snapshot = await res.json();
+    const [statusRes, turnsRes] = await Promise.all([
+      fetch("/api/status", { cache: "no-store" }),
+      fetch("/api/turns", { cache: "no-store" }),
+    ]);
+    if (!statusRes.ok) throw new Error(`HTTP ${statusRes.status}`);
+    if (!turnsRes.ok) throw new Error(`HTTP ${turnsRes.status}`);
+    const snapshot = await statusRes.json();
+    const turns = await turnsRes.json();
     state.snapshot = snapshot;
-    render(snapshot);
+    state.turns = turns;
+    renderApp(snapshot, turns);
     setConnection("live", "ok");
   } catch {
     setConnection("offline", "error");
   }
 }
 
-function render(snapshot) {
+function renderApp(snapshot, turns = state.turns) {
   els.projectName.textContent = projectTitle(snapshot);
   els.projectMeta.textContent = `${snapshot.workflow.name} · ${snapshot.repo}`;
   renderStatusCounts(snapshot);
-  renderGraph(snapshot, togglePanel);
-  renderPanels(snapshot, renderConnectors, render);
+  timeline.render(turns);
+  renderPanels(snapshot);
 }
 
 function projectTitle(snapshot) {
@@ -44,14 +67,7 @@ function renderStatusCounts(snapshot) {
 function togglePanel(agentId) {
   if (openPanels.get(agentId) === PANEL_ORIGIN.USER) openPanels.delete(agentId);
   else openPanels.set(agentId, PANEL_ORIGIN.USER);
-  if (state.snapshot) render(state.snapshot);
-}
-
-function compactNumber(value) {
-  if (!Number.isFinite(value)) return "0";
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`;
-  if (value >= 1_000) return `${Math.round(value / 1_000)}k`;
-  return String(value);
+  if (state.snapshot) renderApp(state.snapshot, state.turns);
 }
 
 function formatDuration(ms) {
@@ -65,13 +81,6 @@ function formatDuration(ms) {
   return `${seconds}s`;
 }
 
-window.addEventListener("resize", () => {
-  if (!state.snapshot) return;
-  renderGraph(state.snapshot, togglePanel);
-  applyPanelHeights();
-  renderConnectors(state.snapshot);
-});
-
-installPanelDrag(renderConnectors);
+installPanelDrag();
 refresh();
 setInterval(refresh, 1000);

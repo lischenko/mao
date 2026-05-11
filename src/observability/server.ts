@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Db } from "../db.js";
 import type { WorkflowConfig } from "../types.js";
-import { buildProjectStatusSnapshot, readAgentSession } from "./read-model.js";
+import { buildProjectStatusSnapshot, buildTurnTimeline, readAgentSession } from "./read-model.js";
 
 export interface ObservabilityServerOptions {
   project: string;
@@ -94,6 +94,12 @@ function handleRequest(req: IncomingMessage, res: ServerResponse, opts: Observab
       workflow: opts.workflow,
       db: opts.db,
     }));
+    return;
+  }
+
+  if (url.pathname === "/api/turns") {
+    const agentIds = opts.workflow.personas.map((p) => p.id);
+    sendJson(res, 200, buildTurnTimeline(opts.projectDir, agentIds));
     return;
   }
 

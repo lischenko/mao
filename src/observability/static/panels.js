@@ -1,4 +1,8 @@
-import { el, els, statusColor } from "./dom.js";
+// Role: Panel layout manager. Creates/removes agent panels, handles divider drag.
+// Boundary: No data fetching, no rendering—only panel DOM construction and layout.
+
+import { el, els } from "./dom.js";
+import { getAgentColor } from "./colors.js";
 import {
   arraysEqual,
   openPanels,
@@ -9,12 +13,12 @@ import {
 } from "./state.js";
 import { dropClosedSessions, ensureSession, fetchSession, maybeFetchSession, panelMeta } from "./sessions.js";
 
-const DIVIDER_HEIGHT = 5;
-const MIN_PANEL_HEIGHT = 80;
+const DIVIDER_WIDTH = 5;
+const MIN_PANEL_WIDTH = 200;
 
 let dragState = null;
 
-export function renderPanels(snapshot, onRenderConnectors, onRender) {
+export function renderPanels(snapshot) {
   reconcileOpenPanels(snapshot);
   const ids = visiblePanelIds();
   reconcilePanelElements(ids);
@@ -23,41 +27,25 @@ export function renderPanels(snapshot, onRenderConnectors, onRender) {
   for (const id of ids) {
     const agent = byId.get(id);
     if (!agent) continue;
-    updatePanelHeader(id, agent, onRender);
+    updatePanelHeader(id, agent);
     maybeFetchSession(agent);
   }
-
-  requestAnimationFrame(() => onRenderConnectors(snapshot));
 }
 
-export function applyPanelHeights(ids = currentPanelIds()) {
-  const available = availablePanelHeight(ids);
-  const defaultProp = 1 / Math.max(1, ids.length);
-
-  for (const id of ids) {
-    if (!state.panelHeights.has(id)) state.panelHeights.set(id, defaultProp);
-  }
-  for (const id of [...state.panelHeights.keys()]) {
-    if (!ids.includes(id)) state.panelHeights.delete(id);
-  }
-
-  setPanelFlex(available, defaultProp);
-}
-
-export function installPanelDrag(onRenderConnectors) {
+export function installPanelDrag() {
   window.addEventListener("mousemove", event => {
     if (!dragState) return;
 
-    const available = availablePanelHeight(dragState.ids);
-    const minProp = MIN_PANEL_HEIGHT / available;
-    const total = dragState.startTop + dragState.startBottom;
-    const nextTop = dragState.startTop + (event.clientY - dragState.startY) / available;
-    const topProp = Math.max(minProp, Math.min(nextTop, total - minProp));
+    const leftPanel = panelElement(dragState.leftId);
+    const rightPanel = panelElement(dragState.rightId);
+    if (!leftPanel || !rightPanel) return;
 
-    state.panelHeights.set(dragState.topId, topProp);
-    state.panelHeights.set(dragState.bottomId, total - topProp);
-    setPanelFlex(available);
-    if (state.snapshot) onRenderConnectors(state.snapshot);
+    const delta = event.clientX - dragState.startX;
+    const newLeft = Math.max(MIN_PANEL_WIDTH, dragState.startLeft + delta);
+    const newRight = Math.max(MIN_PANEL_WIDTH, dragState.startRight - delta);
+
+    leftPanel.style.flex = `0 0 ${newLeft}px`;
+    rightPanel.style.flex = `0 0 ${newRight}px`;
   });
 
   window.addEventListener("mouseup", () => {
@@ -68,14 +56,18 @@ export function installPanelDrag(onRenderConnectors) {
   });
 }
 
+// ── Internals ──────────────────────────────────────────────────────
+
 function reconcilePanelElements(ids) {
   const currentIds = currentPanelIds();
   if (arraysEqual(ids, currentIds)) return;
 
-  const existing = new Map([...els.panelsContainer.querySelectorAll(".agent-panel")].map(panel => [panel.dataset.agentId, panel]));
+  const existing = new Map(
+    [...els.panelsContainer.querySelectorAll(".agent-panel")].map(p => [p.dataset.agentId, p]),
+  );
   els.panelsContainer.replaceChildren();
   ids.forEach((id, index) => {
-    if (index > 0) els.panelsContainer.append(createDivider(index - 1));
+    if (index > 0) els.panelsContainer.append(createDivider());
     const panel = existing.get(id) ?? createPanel(id);
     els.panelsContainer.append(panel);
     if (!existing.has(id)) {
@@ -85,8 +77,6 @@ function reconcilePanelElements(ids) {
   });
 
   dropClosedSessions(ids);
-  state.panelHeights.clear();
-  applyPanelHeights(ids);
 }
 
 function createPanel(id) {
@@ -96,59 +86,62 @@ function createPanel(id) {
   );
 }
 
-function updatePanelHeader(id, agent, onRender) {
+function updatePanelHeader(id, agent) {
   const header = els.panelsContainer.querySelector(`[data-agent-id="${id}"] .agent-header`);
   if (!header) return;
-  header.style.borderLeftColor = statusColor(agent.status);
+  header.style.borderLeftColor = getAgentColor(id);
+  header.classList.toggle("running", agent.status === "running");
   header.replaceChildren(
     el("span", { className: "agent-header-id", textContent: agent.id }),
     el("span", { className: "agent-header-meta", textContent: panelMeta(agent) }),
-    closeButton(id, onRender),
+    closeButton(id),
   );
 }
 
-function closeButton(id, onRender) {
+function closeButton(id) {
   const button = el("button", { className: "panel-close", textContent: "x" });
   button.addEventListener("click", event => {
     event.stopPropagation();
     const agentStatus = state.snapshot?.agents.find(agent => agent.id === id)?.status;
     if (agentStatus === "running") openPanels.set(id, PANEL_ORIGIN.SUPPRESSED);
     else openPanels.delete(id);
-    if (state.snapshot) onRender(state.snapshot);
+    if (state.snapshot) renderPanels(state.snapshot);
   });
   return button;
 }
 
-function createDivider(topIndex) {
+function createDivider() {
   const divider = el("div", { className: "panel-divider" });
   divider.addEventListener("mousedown", event => {
     event.preventDefault();
     const ids = currentPanelIds();
+    const leftId = ids[currentDividerIndex(divider)];
+    const rightId = ids[currentDividerIndex(divider) + 1];
+    const leftPanel = panelElement(leftId);
+    const rightPanel = panelElement(rightId);
+    if (!leftPanel || !rightPanel) return;
+
     dragState = {
-      topId: ids[topIndex],
-      bottomId: ids[topIndex + 1],
-      ids,
-      startY: event.clientY,
-      startTop: state.panelHeights.get(ids[topIndex]) ?? (1 / ids.length),
-      startBottom: state.panelHeights.get(ids[topIndex + 1]) ?? (1 / ids.length),
+      leftId,
+      rightId,
+      startX: event.clientX,
+      startLeft: leftPanel.getBoundingClientRect().width,
+      startRight: rightPanel.getBoundingClientRect().width,
     };
-    document.body.style.cursor = "row-resize";
+    document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
   });
   return divider;
 }
 
-function setPanelFlex(available, fallbackProp = 0) {
-  els.panelsContainer.querySelectorAll(".agent-panel").forEach(panel => {
-    const prop = state.panelHeights.get(panel.dataset.agentId) ?? fallbackProp;
-    panel.style.flex = `0 0 ${Math.round(prop * available)}px`;
-  });
+function currentDividerIndex(divider) {
+  return [...els.panelsContainer.children].indexOf(divider);
 }
 
-function availablePanelHeight(ids) {
-  return els.panelsContainer.clientHeight - Math.max(0, ids.length - 1) * DIVIDER_HEIGHT;
+function panelElement(id) {
+  return els.panelsContainer.querySelector(`[data-agent-id="${id}"]`);
 }
 
 function currentPanelIds() {
-  return [...els.panelsContainer.querySelectorAll(".agent-panel")].map(panel => panel.dataset.agentId);
+  return [...els.panelsContainer.querySelectorAll(".agent-panel")].map(p => p.dataset.agentId);
 }

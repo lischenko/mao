@@ -1,3 +1,6 @@
+// Role: Shared mutable memory. Holds snapshot, open panels, sessions cache.
+// Boundary: No DOM, no fetch, no compute—only storage and simple accessors.
+
 export const PANEL_ORIGIN = {
   USER: "user",
   AUTO: "auto",
@@ -6,13 +9,13 @@ export const PANEL_ORIGIN = {
 
 export const state = {
   snapshot: null,
-  panelHeights: new Map(),
+  turns: null,
 };
 
 export const openPanels = new Map();
 export const sessions = new Map();
 
-export function agentsById(snapshot) {
+function agentsById(snapshot) {
   return new Map(snapshot.agents.map(agent => [agent.id, agent]));
 }
 

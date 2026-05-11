@@ -1,10 +1,18 @@
-import { compactNumber, el, els } from "./dom.js";
-import { sessions } from "./state.js";
+// Role: Session data model. Fetches session events and turn definitions from API.
+// Groups events into turns using backend turn indices (startIndex/endIndex).
+// Boundary: No DOM, no navigation, no rendering—only data fetching and caching.
 
-const FRAMEWORK_TOOLS = new Set(["yield", "reply", "sendMail"]);
+import { compactNumber, els, formatDurationMs, notice } from "./dom.js";
+import { sessions, state } from "./state.js";
+import { rerenderPanel } from "./navigation.js";
+
+// ── Session lifecycle ──────────────────────────────────────────────
 
 export function ensureSession(agentId) {
-  if (!sessions.has(agentId)) sessions.set(agentId, { total: 0, lastIndex: null, inFlight: false });
+  if (!sessions.has(agentId)) sessions.set(agentId, {
+    total: 0, lastIndex: null, inFlight: false,
+    events: null, turns: null, currentTurnIndex: null,
+  });
 }
 
 export function dropClosedSessions(openIds) {
@@ -26,21 +34,34 @@ export async function fetchSession(agentId, afterIndex = null) {
 
   session.inFlight = true;
   try {
-    const data = await fetchSessionData(agentId, afterIndex);
+    const sessionData = await fetchSessionData(agentId, afterIndex);
+
     if (!sessions.has(agentId)) return;
+    session.total = sessionData.total;
 
-    session.total = data.total;
-    const list = sessionList(agentId);
-    if (!list) return;
-
-    if (data.events.length === 0) {
-      if (afterIndex === null) list.replaceChildren(notice("No messages yet"));
-      else list.querySelector(".sev-live")?.remove();
+    if (sessionData.events.length === 0) {
+      if (afterIndex === null) {
+        sessionList(agentId)?.replaceChildren(notice("No messages yet"));
+      }
       return;
     }
 
-    session.lastIndex = lastPersistedIndex(data.events, session.lastIndex);
-    appendSessionItems(list, buildSessionItems(data.events), afterIndex !== null);
+    session.lastIndex = lastPersistedIndex(sessionData.events, session.lastIndex);
+
+    if (afterIndex === null) {
+      session.events = sessionData.events;
+    } else if (session.events) {
+      mergeSessionEvents(session.events, sessionData.events);
+    } else {
+      session.events = sessionData.events;
+    }
+
+    // Group events into turns using backend turn definitions
+    const agentTurnDefs = state.turns?.agents.find(a => a.agentId === agentId)?.turns ?? [];
+    session.turns = groupEventsByTurn(session.events, agentTurnDefs);
+
+    // Re-render
+    rerenderPanel(agentId);
   } catch {
     if (afterIndex === null) {
       sessionList(agentId)?.replaceChildren(notice("Failed to load session"));
@@ -55,11 +76,13 @@ export function panelMeta(agent) {
     agent.role || agent.name || agent.personaId,
     agent.status,
     `${agent.turns.completed}/${agent.turns.total} turns`,
-    formatDuration(agent.activity.durationMs),
+    formatDurationMs(agent.activity.durationMs),
     `${compactNumber(agent.activity.totalTokens)} tok`,
     agent.activity.totalCost ? `$${agent.activity.totalCost.toFixed(3)}` : "",
   ].filter(Boolean).join("  ·  ");
 }
+
+// ── Internals ──────────────────────────────────────────────────────
 
 async function fetchSessionData(agentId, afterIndex) {
   const url = afterIndex !== null
@@ -74,236 +97,67 @@ function sessionList(agentId) {
   return els.panelsContainer.querySelector(`[data-agent-id="${agentId}"] .session-list`);
 }
 
-function appendSessionItems(list, items, incremental) {
-  const liveOpenState = captureLiveOpenState(list);
-  const hadLiveRow = Boolean(liveOpenState);
-  restoreLiveOpenState(items, liveOpenState);
-  const liveViewportState = liveViewportPosition(list);
-  const wasNearBottom = !hadLiveRow && isNearBottom(list);
-  const previousScrollHeight = list.scrollHeight;
-  const previousScrollTop = list.scrollTop;
-  list.querySelector(".sev-live")?.remove();
-  if (incremental) {
-    list.append(...items);
-    restoreScrollPosition(list, { liveViewportState, wasNearBottom, previousScrollHeight, previousScrollTop });
-    return;
-  }
-  list.replaceChildren(...items);
-  if (hadLiveRow) restoreScrollPosition(list, { liveViewportState, wasNearBottom, previousScrollHeight, previousScrollTop });
-  else list.scrollTop = list.scrollHeight;
-}
-
-function captureLiveOpenState(list) {
-  const live = list.querySelector(".sev-live");
-  if (!live) return null;
-  return {
-    thinking: [...live.querySelectorAll(".sev-thinking")].map(node => node.open),
-    toolCalls: [...live.querySelectorAll(".sev-toolcall")].map(node => node.open),
-  };
-}
-
-function restoreLiveOpenState(items, state) {
-  if (!state) return;
-  for (const item of items) {
-    if (!item.classList?.contains("sev-live")) continue;
-    item.querySelectorAll(".sev-thinking").forEach((node, index) => {
-      if (state.thinking[index]) node.open = true;
-    });
-    item.querySelectorAll(".sev-toolcall").forEach((node, index) => {
-      if (state.toolCalls[index] !== undefined) node.open = state.toolCalls[index];
-    });
-  }
-}
-
-function buildSessionItems(events) {
-  return events.flatMap(event => {
-    const msg = event.message;
-    if (msg.role === "toolResult") {
-      if (msg.toolName === "yield") return [el("hr", { className: "turn-sep" })];
-      if (FRAMEWORK_TOOLS.has(msg.toolName)) return [];
+function mergeSessionEvents(events, incoming) {
+  const byIndex = new Map(events.map((event, idx) => [event.index, idx]));
+  for (const event of incoming) {
+    const existingIdx = byIndex.get(event.index);
+    if (existingIdx === undefined) {
+      byIndex.set(event.index, events.length);
+      events.push(event);
+      continue;
     }
-    const item = renderSessionEvent(event);
-    return item ? [item] : [];
-  });
-}
 
-function renderSessionEvent(event) {
-  const msg = event.message;
-  const label = eventLabel(event);
-  const summary = el("summary", {},
-    el("span", { className: "sev-kind", textContent: label.kind }),
-    label.preview ? el("span", { className: "sev-preview", textContent: label.preview }) : null,
-    event.timestamp ? el("time", {
-      className: "sev-ts",
-      textContent: new Date(event.timestamp).toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      }),
-    }) : null,
-  );
-  const details = el("details", {
-    className: `sev sev-${msg.role ?? "other"}${event.live ? " sev-live" : ""}`,
-    open: msg.role !== "toolResult",
-  }, summary);
-
-  const blocks = (msg.content ?? []).map(block => renderBlock(block, event)).filter(Boolean);
-  if (blocks.length > 0) details.append(el("div", { className: "sev-body" }, ...blocks));
-  return details;
-}
-
-function isNearBottom(list) {
-  return list.scrollHeight - list.scrollTop - list.clientHeight < 80;
-}
-
-function restoreScrollPosition(list, state) {
-  if (state.liveViewportState === "end-visible" || state.wasNearBottom) {
-    list.scrollTop = list.scrollHeight;
-    return;
+    const existing = events[existingIdx];
+    if (event.live || existing.live) {
+      events[existingIdx] = event;
+    }
   }
-  if (state.liveViewportState !== "above") {
-    list.scrollTop = state.previousScrollTop;
-    return;
-  }
-  const heightDelta = list.scrollHeight - state.previousScrollHeight;
-  list.scrollTop = state.previousScrollTop + heightDelta;
 }
 
-function liveViewportPosition(list) {
-  const live = list.querySelector(".sev-live");
-  if (!live) return "none";
-  const listRect = list.getBoundingClientRect();
-  const liveRect = live.getBoundingClientRect();
-  if (liveRect.bottom <= listRect.bottom + 16) return "end-visible";
-  if (liveRect.bottom <= listRect.top) return "above";
-  if (liveRect.top >= listRect.bottom) return "below";
-  return "intersecting";
-}
+function groupEventsByTurn(events, turnDefs) {
+  const turns = [];
+  let current = null;
 
-function eventLabel(event) {
-  const msg = event.message;
-  if (event.live) {
-    const label = assistantLabel(msg);
-    return { ...label, preview: label.preview ? `${label.preview} ...` : "..." };
-  }
-  if (msg.role === "toolResult") return { kind: msg.toolName ?? "tool", preview: "" };
-  if (msg.role === "user") return userLabel(msg);
-  if (msg.role !== "assistant") return { kind: msg.role ?? "", preview: "" };
-
-  return assistantLabel(msg);
-}
-
-function assistantLabel(msg) {
-  if (msg.role !== "assistant") return { kind: msg.role ?? "", preview: "" };
-  const parts = (msg.content ?? []).flatMap(blockLabel);
-  return { kind: "Assistant turn", preview: parts.join(" · ") };
-}
-
-function userLabel(msg) {
-  const text = firstText(msg.content);
-  if (text.startsWith("## Framework Turn Context")) {
-    return { kind: "Framework context", preview: preview(text) };
-  }
-  const textPreview = preview(text);
-  return { kind: "Prompt", preview: textPreview };
-}
-
-function blockLabel(block) {
-  if (block.type === "toolCall") return toolCallLabel(block);
-  if (block.type === "thinking") return ["thinking"];
-  if (block.type === "text") return preview(block.text) ? [preview(block.text)] : [];
-  return [block.type];
-}
-
-function toolCallLabel(block) {
-  if (block.name === "yield") return [];
-  if (block.name === "reply") {
-    const text = block.arguments?.content ?? block.input?.content ?? "";
-    return [preview(text) ? `reply: ${preview(text)}` : "reply"];
-  }
-  if (block.name === "sendMail") {
-    const to = block.arguments?.to ?? block.arguments?.recipient ?? block.input?.to ?? "?";
-    return [`-> ${to}`];
-  }
-  return [block.name ?? "tool"];
-}
-
-function renderBlock(block, event) {
-  if (block.type === "text") {
-    return el("pre", { className: "sev-text text-block", textContent: block.text ?? "" });
-  }
-  if (block.type === "thinking") {
-    return el("details", { className: "sev-thinking" },
-      el("summary", { textContent: `thinking · ${(block.thinking ?? "").length} chars` }),
-      el("pre", { className: "sev-thinking-text text-block", textContent: block.thinking ?? "" }),
+  for (const event of events) {
+    // Find which turn (if any) contains this event index
+    const def = turnDefs.find(t =>
+      event.index >= t.startIndex &&
+      (t.endIndex === null || event.index <= t.endIndex)
     );
+    if (!def) continue;
+
+    if (!current || current.turnId !== def.turnId) {
+      if (current) turns.push(current);
+      current = {
+        turnId: def.turnId,
+        events: [],
+        context: { type: def.context ?? "free", label: turnContextLabel(def) },
+        startTime: def.startTime,
+        endTime: def.endTime,
+        status: def.status,
+        sentMailTo: def.sentMailTo ?? [],
+        tokenCount: 0,
+      };
+    }
+
+    if (event.message?.role === "assistant" && event.message?.usage?.totalTokens) {
+      current.tokenCount += event.message.usage.totalTokens;
+    }
+
+    current.events.push(event);
   }
-  if (block.type === "toolCall") return renderToolCall(block, event);
-  return el("span", { className: "sev-unknown", textContent: `[${block.type}]` });
+
+  if (current) turns.push(current);
+  return turns;
 }
 
-function renderToolCall(block, event) {
-  if (block.name === "yield") return null;
-  if (block.name === "reply") {
-    return el("div", { className: "sev-reply text-block", textContent: block.arguments?.content ?? block.input?.content ?? "" });
-  }
-  if (block.name === "sendMail") {
-    return el("div", { className: "sev-sendmail" },
-      el("span", {
-        className: "sev-sendmail-to",
-        textContent: `Mail to ${block.arguments?.to ?? block.arguments?.recipient ?? block.input?.to ?? "?"}`,
-      }),
-      el("p", {
-        className: "text-block",
-        textContent: block.arguments?.content ?? block.arguments?.message ?? block.input?.content ?? "",
-      }),
-    );
-  }
-  if (block.name === "bash") {
-    const command = block.arguments?.command ?? block.input?.command ?? "";
-    return el("pre", { className: "sev-bash text-block", textContent: `bash$ ${command}` });
-  }
-
-  const details = el("details", { className: "sev-toolcall", open: true },
-    el("summary", { textContent: block.name ?? "tool" }),
-  );
-  const args = block.arguments ?? block.input;
-  if (args !== undefined) {
-    details.append(el("pre", { textContent: stringify(args) }));
-  }
-  return details;
-}
-
-function firstText(content = []) {
-  return content.find(block => block.type === "text")?.text ?? "";
-}
-
-function preview(text = "") {
-  return text.slice(0, 60).replace(/\n/g, " ").trim();
-}
-
-function stringify(value) {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function notice(text) {
-  return el("p", { className: "sev-notice", textContent: text });
+function turnContextLabel(def) {
+  if (def.context === "reply" && def.replyToAgent) return `⬅ ${def.replyToAgent}`;
+  if (def.context === "reminder") return "reminder";
+  return "free turn";
 }
 
 function lastPersistedIndex(events, fallback) {
   const persisted = events.filter(event => !event.live);
   return persisted.length > 0 ? persisted[persisted.length - 1].index : fallback;
-}
-
-function formatDuration(ms) {
-  if (!Number.isFinite(ms) || ms < 1000) return "";
-  const totalSeconds = Math.round(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes === 0) return `${seconds}s`;
-  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
 }

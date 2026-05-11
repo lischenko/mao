@@ -308,6 +308,216 @@ function formatSessionEventLabel(event: any): string | null {
   return "assistant";
 }
 
+export interface TurnView {
+  turnId: string;
+  agentId: string;
+  startIndex: number;
+  endIndex: number | null;
+  startTime: string | null;
+  endTime: string | null;
+  context: "initial" | "reply" | "reminder" | "free";
+  activeMailId: string | null;
+  replyToAgent: string | null;
+  replied: boolean;
+  sentMailTo: string[];
+  status: "completed" | "running" | "failed";
+}
+
+export interface TurnTimeline {
+  agents: Array<{ agentId: string; turns: TurnView[] }>;
+  edges: TurnEdgeView[];
+  generatedAt: number;
+}
+
+export interface TurnEdgeView {
+  fromTurnId: string;
+  toTurnId: string;
+  type: "mail" | "reply";
+}
+
+export function buildTurnTimeline(projectDir: string | undefined, agentIds: string[]): TurnTimeline {
+  const agents: TurnTimeline["agents"] = [];
+  for (const agentId of agentIds) {
+    const turns = extractTurnsFromSession(projectDir, agentId);
+    if (turns.length > 0) agents.push({ agentId, turns });
+  }
+  return { agents, edges: buildTurnEdges(agents), generatedAt: Date.now() };
+}
+
+function buildTurnEdges(agents: TurnTimeline["agents"]): TurnEdgeView[] {
+  const edges: TurnEdgeView[] = [];
+  const agentsById = new Map(agents.map((a) => [a.agentId, a]));
+
+  function firstTurnStartingAtOrAfter(agentId: string, minTime: string | null): string | null {
+    const agent = agentsById.get(agentId);
+    if (!agent || !minTime) return null;
+
+    let bestTurn: TurnView | null = null;
+    for (const turn of agent.turns) {
+      if (!turn.startTime || turn.startTime < minTime) continue;
+      if (!bestTurn || turn.startTime < bestTurn.startTime!) bestTurn = turn;
+    }
+    return bestTurn?.turnId ?? null;
+  }
+
+  for (const agent of agents) {
+    for (const turn of agent.turns) {
+      const after = turn.endTime ?? turn.startTime;
+
+      for (const to of turn.sentMailTo) {
+        const toTurnId = firstTurnStartingAtOrAfter(to, after);
+        if (toTurnId) edges.push({ fromTurnId: turn.turnId, toTurnId, type: "mail" });
+      }
+
+      if (turn.replied && turn.replyToAgent) {
+        const toTurnId = firstTurnStartingAtOrAfter(turn.replyToAgent, after);
+        if (toTurnId) edges.push({ fromTurnId: turn.turnId, toTurnId, type: "reply" });
+      }
+    }
+  }
+
+  return edges;
+}
+
+function extractTurnsFromSession(projectDir: string | undefined, agentId: string): TurnView[] {
+  if (!projectDir) return [];
+
+  const sessionFile = join(projectDir, "sessions", `${agentId}.jsonl`);
+  if (!existsSync(sessionFile)) return [];
+
+  const lines = readFileSync(sessionFile, "utf-8").split(/\n/).filter(Boolean);
+  const turns: TurnView[] = [];
+  let currentTurn: TurnView | null = null;
+  let turnNumber = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    let parsed: any;
+    try { parsed = JSON.parse(lines[i]); } catch { continue; }
+    if (parsed.type !== "message" || !parsed.message) continue;
+
+    const msg = parsed.message;
+    const ts = typeof parsed.timestamp === "string" ? parsed.timestamp : null;
+
+    // Detect turn start: user message containing "## Framework Turn Context"
+    if (msg.role === "user") {
+      const text = firstTextContent(msg.content);
+      if (text.includes("## Framework Turn Context")) {
+        // Close previous turn if any — use new turn's start time as previous end
+        if (currentTurn) {
+          currentTurn.endIndex = i;
+          currentTurn.endTime = ts;
+          currentTurn.status = "completed";
+          turns.push(currentTurn);
+        }
+        turnNumber++;
+        currentTurn = {
+          turnId: `${agentId}-${turnNumber}`,
+          agentId,
+          startIndex: i,
+          endIndex: null,
+          startTime: ts,
+          endTime: null,
+          context: parseTurnContext(text),
+          activeMailId: parseActiveMailId(text),
+          replyToAgent: parseReplyToAgent(text),
+          replied: false,
+          sentMailTo: [],
+          status: "running",
+        };
+      }
+      continue;
+    }
+
+    if (!currentTurn) continue;
+
+    // Track sent mail
+    if (msg.role === "assistant") {
+      for (const block of msg.content ?? []) {
+        if (block?.type === "toolCall" && block?.name === "sendMail") {
+          const to = block?.arguments?.to ?? block?.input?.to ?? "";
+          if (to && !currentTurn.sentMailTo.includes(to)) {
+            currentTurn.sentMailTo.push(to);
+          }
+        }
+      }
+    }
+
+    // Detect turn end: toolResult for yield or reply (both have terminate:true)
+    if (msg.role === "toolResult" && (msg.toolName === "yield" || msg.toolName === "reply")) {
+      currentTurn.replied = msg.toolName === "reply";
+      currentTurn.endIndex = i;
+      currentTurn.endTime = ts;
+      currentTurn.status = "completed";
+      turns.push(currentTurn);
+      currentTurn = null;
+    }
+  }
+
+  // Handle trailing turn: running if live session exists, otherwise completed
+  if (currentTurn) {
+    const liveFile = join(projectDir, "sessions", `${agentId}.live.json`);
+    if (existsSync(liveFile)) {
+      currentTurn.status = "running";
+    } else {
+      currentTurn.status = "completed";
+      if (!currentTurn.endTime && lines.length > 0) {
+        try {
+          const last = JSON.parse(lines[lines.length - 1]);
+          if (last.timestamp) currentTurn.endTime = last.timestamp;
+        } catch { /* ignore */ }
+      }
+    }
+    turns.push(currentTurn);
+  }
+
+  return turns;
+}
+
+function firstTextContent(content: unknown[] = []): string {
+  for (const block of content) {
+    if (block && typeof block === "object" && (block as any).type === "text") {
+      return (block as any).text ?? "";
+    }
+  }
+  return "";
+}
+
+function parseTurnContext(text: string): TurnView["context"] {
+  if (text.includes("## Framework Reminder")) return "reminder";
+  if (text.includes("Active mail id: none")) return "free";
+  if (/Active mail id: `[^`]+`/.test(text)) return "reply";
+  return "initial";
+}
+
+function parseActiveMailId(text: string): string | null {
+  const m = text.match(/Active mail id: `([^`]+)`/);
+  return m ? m[1] : null;
+}
+
+function parseReplyToAgent(text: string): string | null {
+  const reminderMatch = text.match(/You still have active mail `[^`]+` from `(\w[\w-]*)`/);
+  if (reminderMatch) return reminderMatch[1];
+
+  const activeMailId = parseActiveMailId(text);
+  if (activeMailId) {
+    for (const line of text.split("\n")) {
+      if (!line.startsWith("### ") || !line.includes(`mail: ${activeMailId}`)) continue;
+
+      const idMatch = line.match(/\bid:\s*([\w-]+)\)/);
+      if (idMatch) return idMatch[1];
+
+      const fromMatch = line.match(/From:\s*([^|]+?)\s*\|/);
+      const from = fromMatch?.[1]?.trim();
+      if (from === "Human") return "human";
+      if (from === "Framework") return "framework";
+      if (from === "User") return "user";
+      if (from && /^[\w-]+$/.test(from)) return from;
+    }
+  }
+
+  return null;
+}
+
 function parseTimestamp(value: unknown): number | null {
   if (typeof value !== "string") return null;
   const at = Date.parse(value);
