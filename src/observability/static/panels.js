@@ -8,9 +8,11 @@ import {
   openPanels,
   PANEL_ORIGIN,
   reconcileOpenPanels,
+  sessions,
   state,
   visiblePanelIds,
 } from "./state.js";
+import { followLiveTurn } from "./navigation.js";
 import { dropClosedSessions, ensureSession, fetchSession, maybeFetchSession, panelMeta } from "./sessions.js";
 
 const DIVIDER_WIDTH = 5;
@@ -94,8 +96,26 @@ function updatePanelHeader(id, agent) {
   header.replaceChildren(
     el("span", { className: "agent-header-id", textContent: agent.id }),
     el("span", { className: "agent-header-meta", textContent: panelMeta(agent) }),
+    followStateButton(id, agent),
     closeButton(id),
   );
+}
+
+function followStateButton(id, agent) {
+  const pinned = sessions.get(id)?.pinnedTurn ?? false;
+  const label = pinned ? "pinned" : agent.status === "running" ? "following live" : "following latest";
+  const button = el("button", {
+    className: `panel-follow${pinned ? " pinned" : ""}`,
+    textContent: label,
+    title: pinned ? "Static past turn. Click to follow live/latest turn." : "Auto-following the active/latest turn.",
+  });
+
+  button.disabled = !pinned;
+  button.addEventListener("click", event => {
+    event.stopPropagation();
+    followLiveTurn(id);
+  });
+  return button;
 }
 
 function closeButton(id) {

@@ -22,12 +22,17 @@ function getTurns(agentId) {
 }
 
 function getTurnIndex(agentId) {
-  return sessions.get(agentId)?.currentTurnIndex ?? 0;
+  const session = sessions.get(agentId);
+  if (!session) return 0;
+  if (session.currentTurnIndex !== null && session.pinnedTurn) return session.currentTurnIndex;
+  return activeTurnIndex(session.turns ?? []);
 }
 
-function setTurnIndex(agentId, idx) {
+function setTurnIndex(agentId, idx, pinned = false) {
   const s = sessions.get(agentId);
-  if (s) s.currentTurnIndex = idx;
+  if (!s) return;
+  s.currentTurnIndex = idx;
+  s.pinnedTurn = pinned;
 }
 
 function sessionList(agentId) {
@@ -50,7 +55,7 @@ export function rerenderPanel(agentId) {
 
   const total = turns.length;
   const idx = Math.max(0, Math.min(total - 1, getTurnIndex(agentId)));
-  setTurnIndex(agentId, idx);
+  setTurnIndex(agentId, idx, sessions.get(agentId)?.pinnedTurn ?? false);
 
   const items = [];
 
@@ -73,8 +78,19 @@ export function rerenderPanel(agentId) {
 }
 
 export function navigateToTurn(agentId, idx) {
-  setTurnIndex(agentId, idx);
+  setTurnIndex(agentId, idx, true);
   const turn = getTurns(agentId)[idx];
+  if (turn) onTurnSelected(turn.turnId);
+  rerenderPanel(agentId);
+}
+
+export function followLiveTurn(agentId) {
+  const turns = getTurns(agentId);
+  if (turns.length === 0) return;
+
+  const idx = activeTurnIndex(turns);
+  setTurnIndex(agentId, idx, false);
+  const turn = turns[idx];
   if (turn) onTurnSelected(turn.turnId);
   rerenderPanel(agentId);
 }
@@ -132,4 +148,9 @@ function restoreOpenDetails(agentId, root) {
       openDetails.set(key, detail.open);
     });
   }
+}
+
+function activeTurnIndex(turns) {
+  const running = turns.findIndex(turn => turn.status === "running");
+  return running === -1 ? Math.max(0, turns.length - 1) : running;
 }

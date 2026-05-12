@@ -10,7 +10,7 @@ import { handleFocusTurn, setTurnSelectedHandler } from "./navigation.js";
 const timeline = createTimeline(document.getElementById("timeline"), {
   onAgentClick: togglePanel,
   onTurnClick: (agentId, turnId) => {
-    if (!openPanels.has(agentId)) {
+    if (!openPanels.has(agentId) || openPanels.get(agentId) === PANEL_ORIGIN.SUPPRESSED) {
       openPanels.set(agentId, PANEL_ORIGIN.USER);
       if (state.snapshot) renderApp(state.snapshot, state.turns);
     }

@@ -12,11 +12,23 @@ export function renderTurn(agentId, turn, num, total) {
     dataset: { turnId: turn.turnId, agentId },
   });
   group.append(renderTurnBanner(agentId, turn, num, total));
-  for (const events of groupRepeatedToolResults(turn.events)) {
-    const item = Array.isArray(events) ? renderToolResultGroup(events) : renderSessionEvent(events);
-    if (item) group.append(item);
+  group.append(renderMailBlock("incoming", incomingMail(turn), `turn:${turn.turnId}:incoming`));
+  group.append(renderWorkSummary(turn));
+  for (const [idx, item] of outgoingMail(turn).entries()) {
+    group.append(renderMailBlock("outgoing", item, `turn:${turn.turnId}:outgoing:${idx}`));
   }
+  const outcome = turnOutcome(turn);
+  if (outcome) group.append(renderTurnOutcome(outcome));
   return group;
+}
+
+function renderEventList(events) {
+  const items = [];
+  for (const group of groupRepeatedToolResults(events)) {
+    const item = Array.isArray(group) ? renderToolResultGroup(group) : renderSessionEvent(group);
+    if (item) items.push(item);
+  }
+  return items;
 }
 
 export function renderTurnEdge(dir, turn, labelNum, onClick) {
@@ -67,6 +79,50 @@ function renderTurnBanner(agentId, turn, num, total) {
     el("span", { className: "turn-banner-label", textContent: parts.join(" · ") }),
     ctxClass ? el("span", { className: `turn-banner-context ${ctxClass}`, textContent: "" }) : null,
     stats.length ? el("span", { className: "turn-banner-stats", textContent: stats.join(" · ") }) : null,
+  );
+}
+
+function renderMailBlock(dir, mail, detailKey) {
+  const isEmpty = !mail?.body;
+  const meta = el("div", { className: "turn-mail-meta" },
+      el("span", { className: "turn-mail-dir", textContent: dir }),
+      mail?.title ? el("span", { className: "turn-mail-title", textContent: mail.title }) : null,
+  );
+
+  if (isEmpty) {
+    return el("section", { className: `turn-mail turn-mail-${dir} empty` }, meta);
+  }
+
+  return el("details", {
+    className: `turn-mail turn-mail-${dir}`,
+    dataset: { detailKey },
+  },
+    el("summary", {},
+      meta,
+      el("span", { className: "turn-mail-preview", textContent: mail.body }),
+    ),
+    el("pre", { className: "turn-mail-body text-block", textContent: mail.body }),
+  );
+}
+
+function renderWorkSummary(turn) {
+  const summary = workSummary(turn);
+  const details = el("details", {
+    className: `turn-work${turn.status === "running" ? " running" : ""}`,
+    dataset: { detailKey: `turn:${turn.turnId}:work` },
+  },
+    el("summary", {},
+      el("span", { className: "turn-work-label", textContent: summary }),
+      el("span", { className: "turn-work-hint", textContent: "details" }),
+    ),
+  );
+  details.append(el("div", { className: "turn-work-body" }, ...renderEventList(turn.events)));
+  return details;
+}
+
+function renderTurnOutcome(outcome) {
+  return el("section", { className: `turn-outcome turn-outcome-${outcome.type}` },
+    el("span", { className: "turn-outcome-label", textContent: outcome.label }),
   );
 }
 
@@ -199,6 +255,143 @@ function toolCallLabel(block) {
   return [block.name ?? "tool"];
 }
 
+function incomingMail(turn) {
+  const contextEvent = turn.events.find(event =>
+    event.message?.role === "user" &&
+    isFrameworkInput(firstTextContent(event.message.content))
+  );
+  const text = firstTextContent(contextEvent?.message?.content);
+  const inbox = extractSection(text, "## Inbox", "## Active Mail Task");
+  const activeTask = extractSection(text, "## Active Mail Task", "");
+  const { title, body } = parseInboxMail(inbox);
+
+  if (body || activeTask) {
+    return {
+      title: title || incomingTitle(turn),
+      body: body || activeTask,
+    };
+  }
+
+  if (turn.context.type === "reminder" && text) {
+    return {
+      title: "reminder",
+      body: text,
+    };
+  }
+
+  if (turn.context.type === "reply") {
+    return {
+      title: `reply to ${replyTarget(turn.context.label)}`,
+      body: "",
+    };
+  }
+
+  return {
+    title: turn.context.type === "free" ? "free turn" : turn.context.label || turn.context.type,
+    body: "",
+  };
+}
+
+function outgoingMail(turn) {
+  const mail = [];
+  for (const event of turn.events) {
+    if (event.message?.role !== "assistant") continue;
+    for (const block of event.message.content ?? []) {
+      if (block.type === "toolCall" && block.name === "sendMail") {
+        mail.push(outgoingMailBlock(block));
+      }
+    }
+  }
+  return mail;
+}
+
+function outgoingMailBlock(block) {
+  const to = block.arguments?.to ?? block.arguments?.recipient ?? block.input?.to ?? "?";
+  return {
+    title: `mail to ${to}`,
+    body: block.arguments?.content ?? block.arguments?.message ?? block.input?.content ?? "",
+  };
+}
+
+function turnOutcome(turn) {
+  for (const event of [...turn.events].reverse()) {
+    if (event.message?.role !== "assistant") continue;
+    for (const block of [...(event.message.content ?? [])].reverse()) {
+      if (block.type !== "toolCall") continue;
+      if (block.name === "yield") return { type: "yield", label: "yielded" };
+      if (block.name === "reply") return { type: "reply", label: "replied" };
+    }
+  }
+  return null;
+}
+
+function workSummary(turn) {
+  if (turn.status === "running") return currentPhase(turn);
+  const labels = new Set();
+  for (const event of turn.events) {
+    if (event.message?.role === "assistant") {
+      for (const block of event.message.content ?? []) {
+        if (block.type === "thinking") labels.add("thinking");
+        else if (block.type === "toolCall" && !["reply", "sendMail", "yield"].includes(block.name)) labels.add("tools");
+        else if (block.type === "text" && preview(block.text)) labels.add("text");
+      }
+    }
+  }
+  const ordered = ["thinking", "tools", "text"].filter(label => labels.has(label));
+  return ordered.join(", ") || "no work";
+}
+
+function currentPhase(turn) {
+  const event = [...turn.events].reverse().find(item => item.live) ?? turn.events[turn.events.length - 1];
+  if (!event) return "running";
+  if (event.message?.role === "toolResult") return "reading results";
+  if (event.message?.role !== "assistant") return "starting";
+
+  const content = event.message.content ?? [];
+  const last = [...content].reverse().find(block => block.type !== "text" || preview(block.text));
+  if (!last) return "running";
+  if (last.type === "thinking") return "thinking";
+  if (last.type === "toolCall") {
+    if (last.name === "reply" || last.name === "sendMail" || last.name === "yield") return "finishing";
+    return "using tools";
+  }
+  if (last.type === "text") return "writing";
+  return last.type ?? "running";
+}
+
+function extractSection(text, startMarker, endMarker) {
+  const start = text.indexOf(startMarker);
+  if (start === -1) return "";
+  const bodyStart = start + startMarker.length;
+  const end = endMarker ? text.indexOf(endMarker, bodyStart) : -1;
+  return text.slice(bodyStart, end === -1 ? undefined : end).trim();
+}
+
+function replyTarget(label = "") {
+  return label.replace(/^⬅\s*/, "").trim() || "sender";
+}
+
+function incomingTitle(turn) {
+  if (turn.context.type === "reply") return `reply to ${replyTarget(turn.context.label)}`;
+  if (turn.context.type === "reminder") return "reminder";
+  return "incoming mail";
+}
+
+function parseInboxMail(inbox) {
+  if (!inbox) return { title: "", body: "" };
+  const lines = inbox.split(/\n/);
+  const headerIndex = lines.findIndex(line => line.startsWith("### "));
+  if (headerIndex === -1) return { title: "incoming mail", body: inbox.trim() };
+
+  const header = lines[headerIndex].replace(/^###\s*/, "").trim();
+  const from = header.match(/From:\s*([^|]+)/)?.[1]?.trim();
+  const body = lines.slice(headerIndex + 1).join("\n").trim();
+  return {
+    title: from ? `from ${from}` : "incoming mail",
+    body,
+  };
+}
+
 function groupRepeatedToolResults(events) {
   const grouped = [];
   for (const event of events) {
@@ -254,6 +447,10 @@ function firstTextContent(content = []) {
     if (block?.type === "text") return block.text ?? "";
   }
   return "";
+}
+
+function isFrameworkInput(text = "") {
+  return text.includes("## Framework Turn Context") || text.includes("## Framework Reminder");
 }
 
 function firstText(content = []) {

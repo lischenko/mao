@@ -11,7 +11,7 @@ import { rerenderPanel } from "./navigation.js";
 export function ensureSession(agentId) {
   if (!sessions.has(agentId)) sessions.set(agentId, {
     total: 0, lastIndex: null, inFlight: false,
-    events: null, turns: null, currentTurnIndex: null,
+    events: null, turns: null, currentTurnIndex: null, pinnedTurn: false,
   });
 }
 
@@ -119,11 +119,7 @@ function groupEventsByTurn(events, turnDefs) {
   let current = null;
 
   for (const event of events) {
-    // Find which turn (if any) contains this event index
-    const def = turnDefs.find(t =>
-      event.index >= t.startIndex &&
-      (t.endIndex === null || event.index <= t.endIndex)
-    );
+    const def = turnForEvent(event, turnDefs);
     if (!def) continue;
 
     if (!current || current.turnId !== def.turnId) {
@@ -149,6 +145,14 @@ function groupEventsByTurn(events, turnDefs) {
 
   if (current) turns.push(current);
   return turns;
+}
+
+function turnForEvent(event, turnDefs) {
+  return turnDefs.find(turn => event.index === turn.startIndex)
+    ?? turnDefs.find(turn =>
+      event.index > turn.startIndex &&
+      (turn.endIndex === null || event.index <= turn.endIndex)
+    );
 }
 
 function turnContextLabel(def) {
