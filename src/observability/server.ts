@@ -98,8 +98,11 @@ function handleRequest(req: IncomingMessage, res: ServerResponse, opts: Observab
   }
 
   if (url.pathname === "/api/turns") {
-    const agentIds = opts.workflow.personas.map((p) => p.id);
-    sendJson(res, 200, buildTurnTimeline(opts.projectDir, agentIds));
+    sendJson(res, 200, buildTurnTimeline({
+      projectDir: opts.projectDir,
+      workflow: opts.workflow,
+      db: opts.db,
+    }));
     return;
   }
 

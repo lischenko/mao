@@ -39,13 +39,6 @@ export async function fetchSession(agentId, afterIndex = null) {
     if (!sessions.has(agentId)) return;
     session.total = sessionData.total;
 
-    if (sessionData.events.length === 0) {
-      if (afterIndex === null) {
-        sessionList(agentId)?.replaceChildren(notice("No messages yet"));
-      }
-      return;
-    }
-
     session.lastIndex = lastPersistedIndex(sessionData.events, session.lastIndex);
 
     if (afterIndex === null) {
@@ -117,21 +110,28 @@ function mergeSessionEvents(events, incoming) {
 function groupEventsByTurn(events, turnDefs) {
   const turns = [];
   let current = null;
+  const seen = new Set();
 
   for (const event of events) {
     const def = turnForEvent(event, turnDefs);
     if (!def) continue;
+    seen.add(def.turnId);
 
     if (!current || current.turnId !== def.turnId) {
       if (current) turns.push(current);
       current = {
         turnId: def.turnId,
         events: [],
-        context: { type: def.context ?? "free", label: turnContextLabel(def) },
+        context: turnContext(def),
         startTime: def.startTime,
         endTime: def.endTime,
         status: def.status,
         sentMailTo: def.sentMailTo ?? [],
+        inbox: def.inbox ?? [],
+        produced: def.produced ?? [],
+        activeMailId: def.activeMailId ?? null,
+        replyToAgent: def.replyToAgent ?? null,
+        replied: def.replied ?? false,
         tokenCount: 0,
       };
     }
@@ -144,20 +144,56 @@ function groupEventsByTurn(events, turnDefs) {
   }
 
   if (current) turns.push(current);
-  return turns;
+  return [
+    ...turns,
+    ...turnDefs.filter(def => !seen.has(def.turnId)).map(turnFromDef),
+  ].sort((a, b) => (a.startTime ?? "").localeCompare(b.startTime ?? ""));
 }
 
 function turnForEvent(event, turnDefs) {
+  if (turnDefs.length === 0) return null;
   return turnDefs.find(turn => event.index === turn.startIndex)
     ?? turnDefs.find(turn =>
+      turn.startIndex !== null &&
       event.index > turn.startIndex &&
       (turn.endIndex === null || event.index <= turn.endIndex)
     );
 }
 
-function turnContextLabel(def) {
-  if (def.context === "reply" && def.replyToAgent) return `⬅ ${def.replyToAgent}`;
-  if (def.context === "reminder") return "reminder";
+function turnFromDef(def) {
+  return {
+    turnId: def.turnId,
+    events: [],
+    context: turnContext(def),
+    startTime: def.startTime,
+    endTime: def.endTime,
+    status: def.status,
+    sentMailTo: def.sentMailTo ?? [],
+    inbox: def.inbox ?? [],
+    produced: def.produced ?? [],
+    activeMailId: def.activeMailId ?? null,
+    replyToAgent: def.replyToAgent ?? null,
+    replied: def.replied ?? false,
+    tokenCount: 0,
+  };
+}
+
+function turnContext(def) {
+  const type = turnContextType(def);
+  return { type, label: turnContextLabel(def, type) };
+}
+
+function turnContextType(def) {
+  if (def.activeMailId) return "reply";
+  if ((def.inbox ?? []).some(message => message.from === "framework" && message.content.includes("## Framework Reminder"))) return "reminder";
+  if ((def.produced ?? []).some(message => message.from === "human" && message.type === "mail" && message.expectsReply) && (def.inbox ?? []).length === 0) return "initial";
+  return "free";
+}
+
+function turnContextLabel(def, type) {
+  if (type === "reply" && def.replyToAgent) return `⬅ ${def.replyToAgent}`;
+  if (type === "reminder") return "reminder";
+  if (type === "initial") return "initial prompt";
   return "free turn";
 }
 

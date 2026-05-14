@@ -4,7 +4,7 @@ import { getPersona } from "./workflow.js";
 import { detectDeadlocks, formatDeadlockError } from "./graph.js";
 import { markInboxDelivered, readInbox } from "./mailbox.js";
 import { runAgentTurn } from "./runner.js";
-import { HUMAN_AGENT_ID, runHumanTurn, routeHumanReply } from "./human.js";
+import { defaultHumanRecipient, HUMAN_AGENT_ID, runHumanTurn, routeHumanTurn } from "./human.js";
 
 const DEFAULT_MAX_PARALLEL = 8;
 
@@ -89,8 +89,9 @@ async function runOneTurn(
     let response: string;
 
     if (agent.id === HUMAN_AGENT_ID) {
-      response = await runHumanTurn(db, inboxText);
-      routeHumanReply(db, response, turnId);
+      const defaultRecipient = defaultHumanRecipient(messages, workflow.lead);
+      const result = await runHumanTurn(db, inboxText, defaultRecipient);
+      response = routeHumanTurn(db, result, turnId);
       setStatusAfterTurn(db, agent.id);
     } else {
       const persona = getPersona(workflow, agent.personaId);

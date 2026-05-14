@@ -311,16 +311,28 @@ function formatSessionEventLabel(event: any): string | null {
 export interface TurnView {
   turnId: string;
   agentId: string;
-  startIndex: number;
+  startIndex: number | null;
   endIndex: number | null;
   startTime: string | null;
   endTime: string | null;
-  context: "initial" | "reply" | "reminder" | "free";
+  context?: "initial" | "reply" | "reminder" | "free";
+  inbox: TurnMessageView[];
+  produced: TurnMessageView[];
   activeMailId: string | null;
   replyToAgent: string | null;
   replied: boolean;
   sentMailTo: string[];
   status: "completed" | "running" | "failed";
+}
+
+export interface TurnMessageView {
+  id: string;
+  from: string;
+  to: string;
+  type: string;
+  parentId: string | null;
+  expectsReply: boolean;
+  content: string;
 }
 
 export interface TurnTimeline {
@@ -335,13 +347,181 @@ export interface TurnEdgeView {
   type: "mail" | "reply";
 }
 
-export function buildTurnTimeline(projectDir: string | undefined, agentIds: string[]): TurnTimeline {
-  const agents: TurnTimeline["agents"] = [];
-  for (const agentId of agentIds) {
-    const turns = extractTurnsFromSession(projectDir, agentId);
-    if (turns.length > 0) agents.push({ agentId, turns });
+export function buildTurnTimeline(args: {
+  projectDir?: string;
+  workflow: WorkflowConfig;
+  db: Db;
+}): TurnTimeline {
+  const { projectDir, workflow, db } = args;
+  const agentOrder = new Map([
+    ...workflow.personas.map((persona, index): [string, number] => [persona.id, index]),
+    ["human", workflow.personas.length],
+  ]);
+  const dbTurns = readDbTurns(db);
+  const sessionHints = readSessionTurnHints(projectDir, [...agentOrder.keys()]);
+  const seenByAgent = new Map<string, number>();
+  const turnsByAgent = new Map<string, TurnView[]>();
+
+  for (const turn of dbTurns) {
+    const turnIndex = seenByAgent.get(turn.agentId) ?? 0;
+    seenByAgent.set(turn.agentId, turnIndex + 1);
+    const hint = sessionHints.get(turn.agentId)?.[turnIndex];
+    if (hint) {
+      turn.startIndex = hint.startIndex;
+      turn.endIndex = hint.endIndex;
+    }
+    const turns = turnsByAgent.get(turn.agentId) ?? [];
+    turns.push(turn);
+    turnsByAgent.set(turn.agentId, turns);
   }
+
+  const agents = [...turnsByAgent.entries()]
+    .sort(([a], [b]) => (agentOrder.get(a) ?? Number.MAX_SAFE_INTEGER) - (agentOrder.get(b) ?? Number.MAX_SAFE_INTEGER))
+    .map(([agentId, turns]) => ({ agentId, turns }));
+
   return { agents, edges: buildTurnEdges(agents), generatedAt: Date.now() };
+}
+
+interface DbTurnRow {
+  id: string;
+  agent_id: string;
+  started_at: number;
+  ended_at: number | null;
+  status: "completed" | "running" | "failed" | null;
+}
+
+interface DbInboxRow {
+  turn_id: string;
+  id: string;
+  from_agent: string;
+  to_agent: string;
+  type: string;
+  parent_id: string | null;
+  expects_reply: number;
+  content: string;
+}
+
+interface DbProducedRow {
+  id: string;
+  produced_by_turn_id: string;
+  from_agent: string;
+  to_agent: string;
+  type: string;
+  parent_id: string | null;
+  expects_reply: number;
+  content: string;
+}
+
+function readDbTurns(db: Db): TurnView[] {
+  const rows = db.raw.prepare(
+    `SELECT id, agent_id, started_at, ended_at, status
+     FROM turns
+     ORDER BY started_at ASC`
+  ).all() as unknown as DbTurnRow[];
+  const inboxByTurn = groupByTurn(readDbTurnInbox(db));
+  const producedByTurn = groupProducedByTurn(readDbProducedMail(db));
+
+  return rows.map((row): TurnView => {
+    const inbox = inboxByTurn.get(row.id) ?? [];
+    const produced = producedByTurn.get(row.id) ?? [];
+    const activeMail = inbox.find((message) => message.expects_reply === 1 && message.type === "mail") ?? null;
+    const replyToAgent = activeMail?.from_agent ?? null;
+    const sentMailTo = unique(produced
+      .filter((message) => message.type === "mail" && message.expects_reply === 1)
+      .map((message) => message.to_agent));
+    const replied = produced.some((message) => message.type === "reply");
+
+    return {
+      turnId: row.id,
+      agentId: row.agent_id,
+      startIndex: null,
+      endIndex: null,
+      startTime: formatTime(row.started_at),
+      endTime: row.ended_at === null ? null : formatTime(row.ended_at),
+      inbox: inbox.map(turnMessageView),
+      produced: produced.map(turnMessageView),
+      activeMailId: activeMail?.id ?? null,
+      replyToAgent,
+      replied,
+      sentMailTo,
+      status: row.ended_at === null ? "running" : row.status === "failed" ? "failed" : "completed",
+    };
+  });
+}
+
+function readDbTurnInbox(db: Db): DbInboxRow[] {
+  return db.raw.prepare(
+    `SELECT ti.turn_id, m.id, m.from_agent, m.to_agent, m.type, m.parent_id,
+            m.expects_reply, m.content
+     FROM turn_inbox ti
+     JOIN mail m ON m.id = ti.message_id
+     ORDER BY m.created_at ASC`
+  ).all() as unknown as DbInboxRow[];
+}
+
+function readDbProducedMail(db: Db): DbProducedRow[] {
+  return db.raw.prepare(
+    `SELECT id, produced_by_turn_id, from_agent, to_agent, type, parent_id,
+            expects_reply, content
+     FROM mail
+     WHERE produced_by_turn_id IS NOT NULL
+     ORDER BY created_at ASC`
+  ).all() as unknown as DbProducedRow[];
+}
+
+function turnMessageView(row: DbInboxRow | DbProducedRow): TurnMessageView {
+  return {
+    id: row.id,
+    from: row.from_agent,
+    to: row.to_agent,
+    type: row.type,
+    parentId: row.parent_id,
+    expectsReply: row.expects_reply === 1,
+    content: row.content,
+  };
+}
+
+function groupByTurn(rows: DbInboxRow[]): Map<string, DbInboxRow[]> {
+  const byTurn = new Map<string, DbInboxRow[]>();
+  for (const row of rows) {
+    const group = byTurn.get(row.turn_id) ?? [];
+    group.push(row);
+    byTurn.set(row.turn_id, group);
+  }
+  return byTurn;
+}
+
+function groupProducedByTurn(rows: DbProducedRow[]): Map<string, DbProducedRow[]> {
+  const byTurn = new Map<string, DbProducedRow[]>();
+  for (const row of rows) {
+    const group = byTurn.get(row.produced_by_turn_id) ?? [];
+    group.push(row);
+    byTurn.set(row.produced_by_turn_id, group);
+  }
+  return byTurn;
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+function formatTime(ms: number): string {
+  return new Date(ms).toISOString();
+}
+
+function readSessionTurnHints(projectDir: string | undefined, agentIds: string[]): Map<string, Array<Pick<TurnView, "startIndex" | "endIndex">>> {
+  const hints = new Map<string, Array<Pick<TurnView, "startIndex" | "endIndex">>>();
+  for (const agentId of agentIds) {
+    const agentHints: Array<Pick<TurnView, "startIndex" | "endIndex">> = [];
+    for (const turn of extractTurnsFromSession(projectDir, agentId)) {
+      agentHints.push({
+        startIndex: turn.startIndex,
+        endIndex: turn.endIndex,
+      });
+    }
+    hints.set(agentId, agentHints);
+  }
+  return hints;
 }
 
 function buildTurnEdges(agents: TurnTimeline["agents"]): TurnEdgeView[] {
@@ -418,6 +598,8 @@ function extractTurnsFromSession(projectDir: string | undefined, agentId: string
           startTime: ts,
           endTime: null,
           context: parseTurnContext(text),
+          inbox: [],
+          produced: [],
           activeMailId: parseActiveMailId(text),
           replyToAgent: parseReplyToAgent(text),
           replied: false,

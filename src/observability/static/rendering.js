@@ -13,7 +13,7 @@ export function renderTurn(agentId, turn, num, total) {
   });
   group.append(renderTurnBanner(agentId, turn, num, total));
   group.append(renderMailBlock("incoming", incomingMail(turn), `turn:${turn.turnId}:incoming`));
-  group.append(renderWorkSummary(turn));
+  group.append(renderWorkSummary(agentId, turn));
   for (const [idx, item] of outgoingMail(turn).entries()) {
     group.append(renderMailBlock("outgoing", item, `turn:${turn.turnId}:outgoing:${idx}`));
   }
@@ -32,10 +32,11 @@ function renderEventList(events) {
 }
 
 export function renderTurnEdge(dir, turn, labelNum, onClick) {
-  const ctx = turn.context;
+  const ctx = turnContext(turn);
   let desc = `Turn ${labelNum}`;
   if (ctx.type === "reply" && ctx.label) desc += ` · ${ctx.label}`;
   else if (ctx.type === "reminder") desc += " · ⚠";
+  else if (ctx.type === "initial") desc += " · initial";
   else desc += " · free";
 
   const edge = el("div", { className: `turn-edge turn-edge-${dir}` },
@@ -48,7 +49,7 @@ export function renderTurnEdge(dir, turn, labelNum, onClick) {
 
 function renderTurnBanner(agentId, turn, num, total) {
   const parts = [`Turn ${num}/${total}`];
-  const ctx = turn.context;
+  const ctx = turnContext(turn);
 
   let ctxClass = "";
   if (ctx.type === "reply") {
@@ -57,6 +58,8 @@ function renderTurnBanner(agentId, turn, num, total) {
   } else if (ctx.type === "reminder") {
     parts.push("⚠ reminder");
     ctxClass = "reminder";
+  } else if (ctx.type === "initial") {
+    parts.push("initial");
   } else {
     parts.push("free");
   }
@@ -105,8 +108,8 @@ function renderMailBlock(dir, mail, detailKey) {
   );
 }
 
-function renderWorkSummary(turn) {
-  const summary = workSummary(turn);
+function renderWorkSummary(agentId, turn) {
+  const summary = workSummary(agentId, turn);
   const details = el("details", {
     className: `turn-work${turn.status === "running" ? " running" : ""}`,
     dataset: { detailKey: `turn:${turn.turnId}:work` },
@@ -256,6 +259,11 @@ function toolCallLabel(block) {
 }
 
 function incomingMail(turn) {
+  const factMail = (turn.inbox ?? []).find(message => message.type === "mail" && message.expectsReply)
+    ?? (turn.inbox ?? []).find(message => message.type === "reply")
+    ?? (turn.inbox ?? []).find(message => message.type === "mail")
+    ?? (turn.inbox ?? []).find(message => message.type === "framework");
+
   const contextEvent = turn.events.find(event =>
     event.message?.role === "user" &&
     isFrameworkInput(firstTextContent(event.message.content))
@@ -272,22 +280,31 @@ function incomingMail(turn) {
     };
   }
 
-  if (turn.context.type === "reminder" && text) {
+  if (factMail) {
+    return {
+      title: incomingFactTitle(factMail),
+      body: factMail.content,
+    };
+  }
+
+  const ctx = turnContext(turn);
+
+  if (ctx.type === "reminder" && text) {
     return {
       title: "reminder",
       body: text,
     };
   }
 
-  if (turn.context.type === "reply") {
+  if (ctx.type === "reply") {
     return {
-      title: `reply to ${replyTarget(turn.context.label)}`,
+      title: `reply to ${replyTarget(ctx.label)}`,
       body: "",
     };
   }
 
   return {
-    title: turn.context.type === "free" ? "free turn" : turn.context.label || turn.context.type,
+    title: fallbackIncomingTitle(turn),
     body: "",
   };
 }
@@ -299,6 +316,13 @@ function outgoingMail(turn) {
     for (const block of event.message.content ?? []) {
       if (block.type === "toolCall" && block.name === "sendMail") {
         mail.push(outgoingMailBlock(block));
+      }
+    }
+  }
+  if (mail.length === 0) {
+    for (const message of turn.produced ?? []) {
+      if (message.type === "mail" && message.expectsReply) {
+        mail.push({ title: `mail to ${message.to}`, body: message.content });
       }
     }
   }
@@ -322,11 +346,18 @@ function turnOutcome(turn) {
       if (block.name === "reply") return { type: "reply", label: "replied" };
     }
   }
+  if (turn.replied) return { type: "reply", label: "replied" };
+  if ((turn.produced ?? []).some(message => message.type === "reply")) return { type: "reply", label: "replied" };
   return null;
 }
 
-function workSummary(turn) {
+function workSummary(agentId, turn) {
   if (turn.status === "running") return currentPhase(turn);
+  if (turn.events.length === 0) {
+    if (agentId === "human" && turn.replied) return "answered";
+    if (agentId === "human") return turn.status === "running" ? "waiting for input" : "human turn";
+    return turn.status === "failed" ? "failed" : "no session events";
+  }
   const labels = new Set();
   for (const event of turn.events) {
     if (event.message?.role === "assistant") {
@@ -342,6 +373,7 @@ function workSummary(turn) {
 }
 
 function currentPhase(turn) {
+  if (turn.events.length === 0) return "waiting";
   const event = [...turn.events].reverse().find(item => item.live) ?? turn.events[turn.events.length - 1];
   if (!event) return "running";
   if (event.message?.role === "toolResult") return "reading results";
@@ -372,9 +404,39 @@ function replyTarget(label = "") {
 }
 
 function incomingTitle(turn) {
-  if (turn.context.type === "reply") return `reply to ${replyTarget(turn.context.label)}`;
-  if (turn.context.type === "reminder") return "reminder";
+  const ctx = turnContext(turn);
+  if (ctx.type === "reply") return `reply to ${replyTarget(ctx.label)}`;
+  if (ctx.type === "reminder") return "reminder";
   return "incoming mail";
+}
+
+function incomingFactTitle(message) {
+  if (message.type === "reply") return `reply from ${message.from}`;
+  if (message.type === "framework") return "framework";
+  return `from ${message.from}`;
+}
+
+function fallbackIncomingTitle(turn) {
+  const ctx = turnContext(turn);
+  if (ctx.type === "reply") return `from ${replyTarget(ctx.label)}`;
+  if (ctx.type === "reminder") return "reminder";
+  if (ctx.type === "free" && turn.replied) return "reply received";
+  if (ctx.type === "initial") return "initial prompt";
+  return ctx.type === "free" ? "free turn" : ctx.label || ctx.type;
+}
+
+function turnContext(turn) {
+  if (turn.context) return turn.context;
+  if (turn.activeMailId) {
+    return { type: "reply", label: turn.replyToAgent ? `⬅ ${turn.replyToAgent}` : "reply required" };
+  }
+  if ((turn.inbox ?? []).some(message => message.from === "framework" && message.content.includes("## Framework Reminder"))) {
+    return { type: "reminder", label: "reminder" };
+  }
+  if ((turn.produced ?? []).some(message => message.from === "human" && message.type === "mail" && message.expectsReply) && (turn.inbox ?? []).length === 0) {
+    return { type: "initial", label: "initial prompt" };
+  }
+  return { type: "free", label: "free turn" };
 }
 
 function parseInboxMail(inbox) {

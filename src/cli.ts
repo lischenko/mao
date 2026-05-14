@@ -100,9 +100,13 @@ Examples:
     if (canStart) {
       const answer = await getStartAnswer(start.ask, opts.prompt);
       if (answer) {
-        if (start.instruction) db.insertMessage("framework", start.to, start.instruction, "framework");
-        db.insertMessage(HUMAN_AGENT_ID, start.to, answer, "mail");
-        db.setAgentStatus(start.to, "ready", Date.now());
+        const turnId = db.startTurn(HUMAN_AGENT_ID);
+        if (start.instruction) {
+          db.insertMessage("framework", start.to, start.instruction, "framework", undefined, turnId);
+        }
+        db.sendMail(HUMAN_AGENT_ID, start.to, answer, turnId);
+        db.endTurn(turnId, "completed");
+        db.setAgentStatus(HUMAN_AGENT_ID, "waiting");
       }
     }
 
