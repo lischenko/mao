@@ -1,0 +1,13 @@
+{
+  "id": "philosophy-forum",
+  "name": "Philosophy Forum",
+  "description": "A moderated forum where prominent philosophers discuss a human-provided topic.",
+  "personas_manifest": "personas.json",
+  "lead": "facilitator",
+  "shared_prompt": "common.md",
+  "start": {
+    "to": "facilitator",
+    "ask": "What topic should the philosophy forum discuss?",
+    "instruction": "You are the forum facilitator. Review the human's topic in your inbox, identify the central question and useful angles, then invite the philosophers to discuss it. Ask Socrates to surface assumptions, Aristotle to organize the issue, Confucius to consider social practice, Buddha to examine suffering and attachment, Descartes to test certainty and method, Hume to challenge empirical and causal claims, Kant to assess duty and universality, Nietzsche to question inherited values, Simone Weil to examine attention and obligation, and Wittgenstein to inspect the language being used. Let the discussion develop through at least one round of replies. If a philosopher raises a conflict or ambiguity worth pursuing, route a focused follow-up to the relevant participants. When the exchange has converged enough to be useful, synthesize the forum's strongest disagreements, shared insights, and practical consequences for the human."
+  }
+}

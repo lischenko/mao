@@ -138,6 +138,8 @@ Persona files are Markdown system prompts. `personas.json` maps persona ids to p
 
 `stavros` is inspired by [How I write software with LLMs](https://www.stavros.io/posts/how-i-write-software-with-llms/) by Stavros Korokithakis. An Architect clarifies with the human until the plan is approved, sends implementation to a Developer, then asks independent reviewers to critique the result before adjudicating feedback.
 
+`philosophy-forum` is a moderated discussion workflow with philosopher personas. The human gives a topic to a facilitator, who invites the cast to discuss it, encourages direct side exchanges when useful, and eventually synthesizes the disagreements and insights. It is loosely inspired by Daily Nous's [Philosophers On GPT-3](https://dailynous.com/2020/07/30/philosophers-gpt-3/) post, but it is just a playful orchestration recipe, not a careful or scientific reproduction of that experiment.
+
 ## Architecture
 
 Each agent has one persistent pi session. Each scheduler turn injects an inbox digest into that session, lets the model act, records any framework tool calls, then marks the injected mail delivered after a successful turn.

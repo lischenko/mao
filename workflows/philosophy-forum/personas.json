@@ -1,0 +1,81 @@
+{
+  "personas": [
+    {
+      "id": "facilitator",
+      "name": "Forum Facilitator",
+      "role": "moderator",
+      "prompt_file": "facilitator.md",
+      "tools": ["sendMail", "reply", "yield"]
+    },
+    {
+      "id": "socrates",
+      "name": "Socrates",
+      "role": "elenctic questioner",
+      "prompt_file": "socrates.md",
+      "tools": ["sendMail", "reply", "yield"]
+    },
+    {
+      "id": "aristotle",
+      "name": "Aristotle",
+      "role": "systematic analyst",
+      "prompt_file": "aristotle.md",
+      "tools": ["sendMail", "reply", "yield"]
+    },
+    {
+      "id": "confucius",
+      "name": "Confucius",
+      "role": "ethical and social philosopher",
+      "prompt_file": "confucius.md",
+      "tools": ["sendMail", "reply", "yield"]
+    },
+    {
+      "id": "buddha",
+      "name": "Buddha",
+      "role": "teacher of suffering and liberation",
+      "prompt_file": "buddha.md",
+      "tools": ["sendMail", "reply", "yield"]
+    },
+    {
+      "id": "descartes",
+      "name": "Rene Descartes",
+      "role": "methodical skeptic",
+      "prompt_file": "descartes.md",
+      "tools": ["sendMail", "reply", "yield"]
+    },
+    {
+      "id": "hume",
+      "name": "David Hume",
+      "role": "empiricist skeptic",
+      "prompt_file": "hume.md",
+      "tools": ["sendMail", "reply", "yield"]
+    },
+    {
+      "id": "kant",
+      "name": "Immanuel Kant",
+      "role": "critical philosopher",
+      "prompt_file": "kant.md",
+      "tools": ["sendMail", "reply", "yield"]
+    },
+    {
+      "id": "nietzsche",
+      "name": "Friedrich Nietzsche",
+      "role": "genealogical critic",
+      "prompt_file": "nietzsche.md",
+      "tools": ["sendMail", "reply", "yield"]
+    },
+    {
+      "id": "simone_weil",
+      "name": "Simone Weil",
+      "role": "philosopher of attention and obligation",
+      "prompt_file": "simone-weil.md",
+      "tools": ["sendMail", "reply", "yield"]
+    },
+    {
+      "id": "wittgenstein",
+      "name": "Ludwig Wittgenstein",
+      "role": "philosopher of language",
+      "prompt_file": "wittgenstein.md",
+      "tools": ["sendMail", "reply", "yield"]
+    }
+  ]
+}
