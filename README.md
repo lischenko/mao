@@ -1,8 +1,8 @@
 # mao - Minimal Agent Orchestration
 
-`mao` is a local CLI for running a persistent team of coding agents against a repository. Agents communicate through framework-managed mail, and `mao` schedules them until the workflow finishes, blocks on another agent, or asks the human for input.
+`mao` is a local LLM multi-agent orchestration CLI for coding workflows. It runs persistent teams of coding agents against a repository, coordinates them through framework-managed mail, and shows their work in a live observability UI.
 
-The project is experimental, unstable, and mostly built for my own education. It is vibe-coded and intentionally small. The interesting part is the orchestration model: agents have durable sessions, mail creates blocking waits, and those waits implicitly form a dynamic dependency graph.
+The project is experimental, unstable, and mostly built for my own education. It is vibe-coded and intentionally small. The interesting part is the orchestration model: agents have durable sessions, mail creates blocking waits, and those waits implicitly form a dynamic dependency graph. Unlike a single long agent prompt, `mao` keeps each agent's identity, inbox, wait state, and transcript separate across turns.
 
 ![Agent orchestration graph](docs/graph.png)
 
@@ -24,6 +24,7 @@ npm link
 
 cd /path/to/a/repo
 mao run --project demo --repo . --workflow star-team --prompt "create a hello world CLI"
+mao ui --project demo
 ```
 
 Mao uses pi's default model unless a workflow overrides it per-agent (e.g., [stavros](workflows/stavros/config.json) assigns specific models to each role).
