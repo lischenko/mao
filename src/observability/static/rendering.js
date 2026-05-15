@@ -3,6 +3,7 @@
 
 import { compactNumber, el, formatDurationMs } from "./dom.js";
 import { getAgentColor } from "./colors.js";
+import { renderMarkdown } from "./markdown.js";
 
 // ── Turn-level rendering ──────────────────────────────────────────
 
@@ -104,7 +105,7 @@ function renderMailBlock(dir, mail, detailKey) {
       meta,
       el("span", { className: "turn-mail-preview", textContent: mail.body }),
     ),
-    el("pre", { className: "turn-mail-body text-block", textContent: mail.body }),
+    renderMarkdown(mail.body, "turn-mail-body"),
   );
 }
 
@@ -163,7 +164,7 @@ function renderSessionEvent(event) {
 
 function renderBlock(block, eventKey, idx) {
   if (block.type === "text") {
-    return el("pre", { className: "sev-text text-block", textContent: block.text ?? "" });
+    return renderMarkdown(block.text ?? "", "sev-text");
   }
   if (block.type === "thinking") {
     return el("details", {
@@ -181,17 +182,14 @@ function renderBlock(block, eventKey, idx) {
 function renderToolCall(block, detailKey) {
   if (block.name === "yield") return null;
   if (block.name === "reply") {
-    return el("div", {
-      className: "sev-reply text-block",
-      textContent: block.arguments?.content ?? block.input?.content ?? "",
-    });
+    return renderMarkdown(block.arguments?.content ?? block.input?.content ?? "", "sev-reply");
   }
   if (block.name === "sendMail") {
     const to = block.arguments?.to ?? block.input?.to ?? "?";
     const content = block.arguments?.content ?? block.input?.content ?? "";
     return el("div", { className: "sev-sendmail" },
       el("span", { className: "sev-sendmail-to", textContent: `Mail to ${to}` }),
-      el("p", { className: "text-block", textContent: content }),
+      renderMarkdown(content, "sev-sendmail-body"),
     );
   }
   if (block.name === "bash") {
