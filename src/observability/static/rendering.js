@@ -127,6 +127,19 @@ function renderWorkSummary(agentId, turn) {
 }
 
 function renderTurnOutcome(outcome) {
+  if (outcome.body) {
+    return el("details", {
+      className: `turn-outcome turn-outcome-${outcome.type}`,
+      dataset: { detailKey: `outcome:${outcome.type}:${preview(outcome.body)}` },
+    },
+      el("summary", {},
+        el("span", { className: "turn-outcome-label", textContent: outcome.label }),
+        el("span", { className: "turn-outcome-preview", textContent: outcome.body }),
+      ),
+      renderMarkdown(outcome.body, "turn-outcome-body"),
+    );
+  }
+
   return el("section", { className: `turn-outcome turn-outcome-${outcome.type}` },
     el("span", { className: "turn-outcome-label", textContent: outcome.label }),
   );
@@ -346,11 +359,18 @@ function turnOutcome(turn) {
     for (const block of [...(event.message.content ?? [])].reverse()) {
       if (block.type !== "toolCall") continue;
       if (block.name === "yield") return { type: "yield", label: "yielded" };
-      if (block.name === "reply") return { type: "reply", label: "replied" };
+      if (block.name === "reply") {
+        return {
+          type: "reply",
+          label: "replied",
+          body: block.arguments?.content ?? block.input?.content ?? "",
+        };
+      }
     }
   }
+  const producedReply = (turn.produced ?? []).find(message => message.type === "reply");
+  if (producedReply) return { type: "reply", label: "replied", body: producedReply.content };
   if (turn.replied) return { type: "reply", label: "replied" };
-  if ((turn.produced ?? []).some(message => message.type === "reply")) return { type: "reply", label: "replied" };
   return null;
 }
 

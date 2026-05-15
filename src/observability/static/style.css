@@ -468,6 +468,21 @@ details.turn-mail {
   color: var(--muted);
 }
 
+details.turn-outcome {
+  cursor: pointer;
+}
+
+.turn-outcome > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  list-style: none;
+}
+
+.turn-outcome > summary::-webkit-details-marker {
+  display: none;
+}
+
 .turn-outcome-reply {
   border-left-color: var(--ready);
   background: rgba(47, 125, 104, 0.04);
@@ -478,8 +493,28 @@ details.turn-mail {
 }
 
 .turn-outcome-label {
+  flex: 0 0 auto;
   font-weight: 650;
   text-transform: uppercase;
+}
+
+.turn-outcome-preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.turn-outcome[open] .turn-outcome-preview {
+  display: none;
+}
+
+.turn-outcome-body {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-size: 11px;
+  cursor: text;
 }
 
 .turn-edge {
