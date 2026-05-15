@@ -152,6 +152,10 @@ function groupEventsByTurn(events, turnDefs) {
 
 function turnForEvent(event, turnDefs) {
   if (turnDefs.length === 0) return null;
+  if (event.turnId) {
+    const turn = turnDefs.find(def => def.turnId === event.turnId);
+    if (turn) return turn;
+  }
   return turnDefs.find(turn => event.index === turn.startIndex)
     ?? turnDefs.find(turn =>
       turn.startIndex !== null &&

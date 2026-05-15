@@ -90,6 +90,7 @@ export interface StatusTotals {
 
 export interface SessionEventView {
   index: number;
+  turnId?: string;
   timestamp: string | null;
   message: Message;
   live?: boolean;
@@ -549,14 +550,36 @@ function buildTurnEdges(agents: TurnTimeline["agents"]): TurnEdgeView[] {
         if (toTurnId) edges.push({ fromTurnId: turn.turnId, toTurnId, type: "mail" });
       }
 
-      if (turn.replied && turn.replyToAgent) {
-        const toTurnId = firstTurnStartingAtOrAfter(turn.replyToAgent, after);
-        if (toTurnId) edges.push({ fromTurnId: turn.turnId, toTurnId, type: "reply" });
+      for (const message of turn.inbox) {
+        if (message.type !== "reply" || !message.parentId) continue;
+        const sourceTurnId = findProducedMessageTurn(agents, message.id);
+        if (sourceTurnId) edges.push({ fromTurnId: sourceTurnId, toTurnId: turn.turnId, type: "reply" });
       }
     }
   }
 
-  return edges;
+  return uniqueEdges(edges);
+}
+
+function findProducedMessageTurn(agents: TurnTimeline["agents"], messageId: string): string | null {
+  for (const agent of agents) {
+    for (const turn of agent.turns) {
+      if (turn.produced.some((message) => message.id === messageId)) return turn.turnId;
+    }
+  }
+  return null;
+}
+
+function uniqueEdges(edges: TurnEdgeView[]): TurnEdgeView[] {
+  const seen = new Set<string>();
+  const unique: TurnEdgeView[] = [];
+  for (const edge of edges) {
+    const key = `${edge.type}:${edge.fromTurnId}:${edge.toTurnId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(edge);
+  }
+  return unique;
 }
 
 function extractTurnsFromSession(projectDir: string | undefined, agentId: string): TurnView[] {
@@ -776,6 +799,7 @@ function readLiveSessionEvent(
   if (!parsed.message || parsed.message.role !== "assistant") return null;
   return {
     index,
+    turnId: typeof parsed.turnId === "string" ? parsed.turnId : undefined,
     timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : null,
     message: parsed.message,
     live: true,

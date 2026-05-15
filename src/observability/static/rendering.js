@@ -13,7 +13,9 @@ export function renderTurn(agentId, turn, num, total) {
     dataset: { turnId: turn.turnId, agentId },
   });
   group.append(renderTurnBanner(agentId, turn, num, total));
-  group.append(renderMailBlock("incoming", incomingMail(turn), `turn:${turn.turnId}:incoming`));
+  for (const [idx, item] of incomingMail(turn).entries()) {
+    group.append(renderMailBlock("incoming", item, `turn:${turn.turnId}:incoming:${idx}`));
+  }
   group.append(renderWorkSummary(agentId, turn));
   for (const [idx, item] of outgoingMail(turn).entries()) {
     group.append(renderMailBlock("outgoing", item, `turn:${turn.turnId}:outgoing:${idx}`));
@@ -257,10 +259,12 @@ function toolCallLabel(block) {
 }
 
 function incomingMail(turn) {
-  const factMail = (turn.inbox ?? []).find(message => message.type === "mail" && message.expectsReply)
-    ?? (turn.inbox ?? []).find(message => message.type === "reply")
-    ?? (turn.inbox ?? []).find(message => message.type === "mail")
-    ?? (turn.inbox ?? []).find(message => message.type === "framework");
+  const factMail = [
+    ...(turn.inbox ?? []).filter(message => message.type === "mail" && message.expectsReply),
+    ...(turn.inbox ?? []).filter(message => message.type === "reply"),
+    ...(turn.inbox ?? []).filter(message => message.type === "mail" && !message.expectsReply),
+    ...(turn.inbox ?? []).filter(message => message.type === "framework"),
+  ];
 
   const contextEvent = turn.events.find(event =>
     event.message?.role === "user" &&
@@ -269,42 +273,43 @@ function incomingMail(turn) {
   const text = firstTextContent(contextEvent?.message?.content);
   const inbox = extractSection(text, "## Inbox", "## Active Mail Task");
   const activeTask = extractSection(text, "## Active Mail Task", "");
-  const { title, body } = parseInboxMail(inbox);
+  const parsedInbox = parseInboxMail(inbox);
 
-  if (body || activeTask) {
-    return {
-      title: title || incomingTitle(turn),
-      body: body || activeTask,
-    };
+  if (parsedInbox.length || activeTask) {
+    if (parsedInbox.length) return parsedInbox;
+    return [{
+      title: incomingTitle(turn),
+      body: activeTask,
+    }];
   }
 
-  if (factMail) {
-    return {
-      title: incomingFactTitle(factMail),
-      body: factMail.content,
-    };
+  if (factMail.length) {
+    return factMail.map(message => ({
+      title: incomingFactTitle(message),
+      body: message.content,
+    }));
   }
 
   const ctx = turnContext(turn);
 
   if (ctx.type === "reminder" && text) {
-    return {
+    return [{
       title: "reminder",
       body: text,
-    };
+    }];
   }
 
   if (ctx.type === "reply") {
-    return {
+    return [{
       title: `reply to ${replyTarget(ctx.label)}`,
       body: "",
-    };
+    }];
   }
 
-  return {
+  return [{
     title: fallbackIncomingTitle(turn),
     body: "",
-  };
+  }];
 }
 
 function outgoingMail(turn) {
@@ -371,7 +376,7 @@ function workSummary(agentId, turn) {
 }
 
 function currentPhase(turn) {
-  if (turn.events.length === 0) return "waiting";
+  if (turn.events.length === 0) return "starting";
   const event = [...turn.events].reverse().find(item => item.live) ?? turn.events[turn.events.length - 1];
   if (!event) return "running";
   if (event.message?.role === "toolResult") return "reading results";
@@ -438,18 +443,27 @@ function turnContext(turn) {
 }
 
 function parseInboxMail(inbox) {
-  if (!inbox) return { title: "", body: "" };
+  if (!inbox) return [];
   const lines = inbox.split(/\n/);
-  const headerIndex = lines.findIndex(line => line.startsWith("### "));
-  if (headerIndex === -1) return { title: "incoming mail", body: inbox.trim() };
+  const headerIndices = lines
+    .map((line, index) => line.startsWith("### ") ? index : -1)
+    .filter(index => index !== -1);
 
-  const header = lines[headerIndex].replace(/^###\s*/, "").trim();
-  const from = header.match(/From:\s*([^|]+)/)?.[1]?.trim();
-  const body = lines.slice(headerIndex + 1).join("\n").trim();
-  return {
-    title: from ? `from ${from}` : "incoming mail",
-    body,
-  };
+  if (headerIndices.length === 0) {
+    return [{ title: "incoming mail", body: inbox.trim() }];
+  }
+
+  return headerIndices.map((headerIndex, idx) => {
+    const nextHeader = headerIndices[idx + 1] ?? lines.length;
+    const header = lines[headerIndex].replace(/^###\s*/, "").trim();
+    const from = header.match(/From:\s*([^|]+)/)?.[1]?.trim();
+    const type = header.match(/\|\s*([^|]+?)(?:\s*\|\s*mail:|$)/)?.[1]?.trim();
+    const body = lines.slice(headerIndex + 1, nextHeader).join("\n").trim();
+    return {
+      title: from ? `${type === "reply" ? "reply from" : "from"} ${from}` : "incoming mail",
+      body,
+    };
+  });
 }
 
 function groupRepeatedToolResults(events) {

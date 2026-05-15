@@ -30,10 +30,25 @@ export interface SchedulerOptions {
 export async function runScheduler(opts: SchedulerOptions): Promise<void> {
   const { db } = opts;
   const maxParallel = opts.maxParallel ?? DEFAULT_MAX_PARALLEL;
+  const inFlight = new Set<Promise<void>>();
 
   while (true) {
     refreshAgentStatuses(db);
     const readyAgents = db.getReadyAgents();
+
+    const batch = selectLaunchBatch(readyAgents, maxParallel, inFlight.size);
+    for (const agent of batch) {
+      let turn: Promise<void>;
+      turn = runOneTurn(agent, opts).finally(() => {
+        inFlight.delete(turn);
+      });
+      inFlight.add(turn);
+    }
+
+    if (inFlight.size > 0) {
+      await Promise.race(inFlight);
+      continue;
+    }
 
     if (readyAgents.length === 0) {
       const waitingAgents = db.getAllAgents().filter((a) => a.status === "waiting");
@@ -46,27 +61,34 @@ export async function runScheduler(opts: SchedulerOptions): Promise<void> {
       }
       break;
     }
-
-    // Fair scheduling: oldest-ready-first, but run up to maxParallel at once.
-    // If maxParallel is 1 or the human agent is the next ready agent, run singly.
-    const batch = selectBatch(readyAgents, maxParallel);
-
-    await Promise.all(batch.map((agent) => runOneTurn(agent, opts)));
   }
 }
 
-/** Pick the next batch of agents to run. Human always runs alone. */
-function selectBatch(readyAgents: AgentRecord[], maxParallel: number): AgentRecord[] {
+/**
+ * Pick the next agents to launch. Existing turns keep running, and this fills
+ * available slots as they free up. Human always runs alone.
+ */
+function selectLaunchBatch(
+  readyAgents: AgentRecord[],
+  maxParallel: number,
+  runningCount: number
+): AgentRecord[] {
+  if (readyAgents.length === 0) return [];
+  const slots = Math.max(0, maxParallel - runningCount);
+  if (slots === 0) return [];
+
+  if (readyAgents[0].id === HUMAN_AGENT_ID) {
+    return runningCount === 0 ? [readyAgents[0]] : [];
+  }
+
   if (maxParallel <= 1) return [readyAgents[0]];
   const batch: AgentRecord[] = [];
   for (const agent of readyAgents) {
     if (agent.id === HUMAN_AGENT_ID) {
-      // Human always gets a solo turn to avoid stdin chaos.
-      if (batch.length === 0) return [agent];
       break;
     }
     batch.push(agent);
-    if (batch.length >= maxParallel) break;
+    if (batch.length >= slots) break;
   }
   return batch;
 }
