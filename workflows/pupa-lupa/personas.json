@@ -1,0 +1,34 @@
+{
+  "personas": [
+    {
+      "id": "pupa",
+      "name": "Pupa",
+      "role": "proposing planner",
+      "prompt_file": "pupa.md",
+      "tools": ["read", "bash", "sendMail", "reply", "yield"]
+    },
+    {
+      "id": "lupa",
+      "name": "Lupa",
+      "role": "critical reviewer",
+      "prompt_file": "lupa.md",
+      "tools": ["read", "bash", "sendMail", "reply", "yield"],
+      "tool_schema_overrides": {
+        "reply": {
+          "description": "Every reply to Pupa must begin with PLAN_ACCEPTED or PLAN_REJECTED. Use PLAN_REJECTED when Pupa must revise the plan. Use PLAN_ACCEPTED only when the plan is ready for the human.",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string",
+                "pattern": "^PLAN_(ACCEPTED|REJECTED)\\b",
+                "description": "Reply body. Must start with PLAN_ACCEPTED or PLAN_REJECTED."
+              }
+            },
+            "required": ["content"]
+          }
+        }
+      }
+    }
+  ]
+}

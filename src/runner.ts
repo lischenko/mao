@@ -60,7 +60,7 @@ export async function runAgentTurn(
     yielded: false,
   };
 
-  const customTools = createFrameworkTools(db, ctx);
+  const customTools = createFrameworkTools(db, ctx, persona.toolSchemaOverrides);
   const allowedTools = getAllowedTools(persona);
 
   const { session } = await createAgentSessionFromServices({

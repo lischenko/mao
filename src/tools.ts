@@ -1,7 +1,7 @@
 import { defineTool } from "@mariozechner/pi-coding-agent";
 import { MailCycleError } from "./db.js";
 import type { Db } from "./db.js";
-import type { AgentId, MailId, TurnContext } from "./types.js";
+import type { AgentId, MailId, ToolSchemaOverride, TurnContext } from "./types.js";
 
 const strParam = (description: string) => ({ type: "string" as const, description });
 
@@ -20,8 +20,12 @@ function unknownRecipientResult(toolName: string, rawTo: string) {
   };
 }
 
-export function createFrameworkTools(db: Db, ctx: TurnContext) {
-  const sendMail = defineTool({
+export function createFrameworkTools(
+  db: Db,
+  ctx: TurnContext,
+  toolSchemaOverrides: Record<string, ToolSchemaOverride> = {}
+) {
+  const sendMail = defineTool(withToolSchemaOverride({
     name: "sendMail",
     label: "Send Mail",
     description:
@@ -43,7 +47,7 @@ export function createFrameworkTools(db: Db, ctx: TurnContext) {
       },
       required: [],
     },
-    execute: async (_id, params: { to?: string; content?: string; recipient?: string; message?: string }) => {
+    execute: async (_id: string, params: { to?: string; content?: string; recipient?: string; message?: string }) => {
       const rawTo = params.to ?? params.recipient;
       const content = params.content ?? params.message;
       if (!rawTo || !content) {
@@ -90,9 +94,9 @@ export function createFrameworkTools(db: Db, ctx: TurnContext) {
         details: {},
       };
     },
-  });
+  }, toolSchemaOverrides.sendMail));
 
-  const reply = defineTool({
+  const reply = defineTool(withToolSchemaOverride({
     name: "reply",
     label: "Reply",
     description:
@@ -105,7 +109,13 @@ export function createFrameworkTools(db: Db, ctx: TurnContext) {
       },
       required: ["content"],
     },
-    execute: async (_id, params: { content: string }) => {
+    execute: async (_id: string, params: { content: string }) => {
+      if (typeof params.content !== "string") {
+        return {
+          content: [{ type: "text" as const, text: "Error: reply requires content string." }],
+          details: {},
+        };
+      }
       if (!ctx.activeMailId) {
         return {
           content: [{ type: "text" as const, text: "Error: no active mail to reply to." }],
@@ -128,9 +138,9 @@ export function createFrameworkTools(db: Db, ctx: TurnContext) {
         terminate: true,
       };
     },
-  });
+  }, toolSchemaOverrides.reply));
 
-  const yieldTurn = defineTool({
+  const yieldTurn = defineTool(withToolSchemaOverride({
     name: "yield",
     label: "Yield",
     description:
@@ -162,7 +172,25 @@ export function createFrameworkTools(db: Db, ctx: TurnContext) {
         terminate: true,
       };
     },
-  });
+  }, toolSchemaOverrides.yield));
 
   return [sendMail, reply, yieldTurn];
+}
+
+function withToolSchemaOverride<T extends {
+  description: string;
+  parameters: Record<string, unknown>;
+}>(
+  definition: T,
+  override: ToolSchemaOverride | undefined
+): T {
+  if (!override) return definition;
+
+  return {
+    ...definition,
+    description: override.description
+      ? `${definition.description}\n\nWorkflow-specific requirement: ${override.description}`
+      : definition.description,
+    parameters: override.schema,
+  };
 }

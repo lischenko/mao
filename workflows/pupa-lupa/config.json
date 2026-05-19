@@ -1,0 +1,23 @@
+{
+  "id": "pupa-lupa",
+  "name": "Pupa-Lupa",
+  "description": "Two-agent planning loop: Pupa proposes a concrete implementation plan, Lupa critiques it until the plan is accepted.",
+  "personas_manifest": "personas.json",
+  "shared_prompt": "common.md",
+  "lead": "pupa",
+  "start": {
+    "to": "pupa",
+    "ask": "What should Pupa and Lupa plan?",
+    "instruction": "You are Pupa, the proposing planner. Review the human's request in your inbox, inspect the repository enough to ground the plan in real files and code paths, then draft Pupa #1: a concrete implementation plan. Send the full draft to Lupa for critique. Iterate with Lupa through Pupa #2, Pupa #3, and so on until Lupa replies with the exact decision marker PLAN_ACCEPTED. When accepted, reply to the human with the final plan, including the main approach, concrete steps, files or subsystems likely affected, verification strategy, risks, stop conditions, and any open questions."
+  },
+  "agent_overrides": {
+    "pupa": {
+      "model": "openai-codex/gpt-5.4-mini",
+      "thinking_level": "medium"
+    },
+    "lupa": {
+      "model": "claude-opus-4-6",
+      "thinking_level": "medium"
+    }
+  }
+}

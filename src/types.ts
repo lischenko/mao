@@ -49,6 +49,12 @@ export interface PersonaConfig {
   tools?: string[];
   model?: string;
   thinkingLevel?: "none" | "low" | "medium" | "high" | "max";
+  toolSchemaOverrides?: Record<string, ToolSchemaOverride>;
+}
+
+export interface ToolSchemaOverride {
+  description?: string;
+  schema: Record<string, unknown>;
 }
 
 export interface WorkflowConfig {

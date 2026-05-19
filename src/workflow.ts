@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { WorkflowConfig, PersonaConfig } from "./types.js";
+import type { WorkflowConfig, PersonaConfig, ToolSchemaOverride } from "./types.js";
 
 const WORKFLOW_CONFIG_FILE = "config.json";
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -15,6 +15,7 @@ interface PersonasManifestEntry {
   tools?: string[];
   model?: string;
   thinking_level?: PersonaConfig["thinkingLevel"];
+  tool_schema_overrides?: Record<string, ToolSchemaOverride>;
 }
 
 interface PersonasManifest {
@@ -58,6 +59,7 @@ export function loadWorkflow(workflowPath: string): WorkflowConfig {
       tools: ov.tools ?? entry.tools,
       model: ov.model ?? entry.model,
       thinkingLevel: ov.thinking_level ?? entry.thinking_level,
+      toolSchemaOverrides: entry.tool_schema_overrides,
     };
   });
 

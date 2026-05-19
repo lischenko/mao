@@ -141,6 +141,8 @@ Persona files are Markdown system prompts. `personas.json` maps persona ids to p
 
 `philosophy-forum` is a moderated discussion workflow with philosopher personas. The human gives a topic to a facilitator, who invites the cast to discuss it, encourages direct side exchanges when useful, and eventually synthesizes the disagreements and insights. It is loosely inspired by Daily Nous's [Philosophers On GPT-3](https://dailynous.com/2020/07/30/philosophers-gpt-3/) post, but it is just a playful orchestration recipe, not a careful or scientific reproduction of that experiment.
 
+`pupa-lupa` is a two-agent planning loop inspired by Pupa-Lupa ANalysis, or PLAN, from Telegram's [@itpgchannel](https://t.me/itpgchannel). Pupa proposes a repository-grounded implementation plan, Lupa critiques it, and they iterate through framework mail until Lupa explicitly accepts the plan. This workflow is for planning only; both agents are prevented by prompt and tools from editing files. It also demonstrates workflow-specific tool schema overrides: Lupa's `reply` call is constrained to make each review decision explicit.
+
 ## Architecture
 
 Each agent has one persistent pi session. Each scheduler turn injects an inbox digest into that session, lets the model act, records any framework tool calls, then marks the injected mail delivered after a successful turn.
